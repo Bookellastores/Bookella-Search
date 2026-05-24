@@ -300,29 +300,35 @@ export default function BookellaDashboard() {
     return orig;
   }, [originalPrice]);
 
-  // Google Books info expansion
+  // AI-powered Omni fetch
   const handleAutoFetch = async () => {
     if (!title.trim()) return;
     setApiLoading(true);
     try {
-      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(title)}&maxResults=1`);
+      showToast("جاري البحث في المصادر وتحليل البيانات بالذكاء الاصطناعي...", "info");
+      const res = await fetch("/api/fetch-book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim() })
+      });
+      
       const data = await res.json();
-      const info = data.items?.[0]?.volumeInfo;
-      if (info) {
-        setAuthor(info.authors?.join(", ") || "");
-        setCategory(info.categories?.[0] || "رواية");
-        setPageCount(String(info.pageCount || 250));
-        let thumb = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || "";
-        if (thumb.startsWith("http://")) {
-          thumb = thumb.replace("http://", "https://");
-        }
-        setCoverUrl(thumb);
-        showToast("تم جلب البيانات وإثراؤها تلقائياً بالكامل!", "success");
-      } else {
-        showToast("لم نجد بيانات دقيقة لهذا الكتاب في جوجل، اكتبها يدوياً", "info");
+      
+      if (!res.ok || data.error) {
+        showToast(data.error || "لم نجد بيانات دقيقة لهذا الكتاب، يمكنك كتابتها يدوياً", "error");
+        return;
       }
+      
+      if (data.title) setTitle(data.title);
+      if (data.author) setAuthor(data.author);
+      if (data.category) setCategory(data.category);
+      if (data.pageCount) setPageCount(String(data.pageCount));
+      if (data.coverImage) setCoverUrl(data.coverImage);
+      if (data.arabicSummary) setNotes(data.arabicSummary);
+      
+      showToast("تم تحليل وإثراء بيانات الكتاب بنجاح بواسطة الذكاء الاصطناعي!", "success");
     } catch (err: any) {
-      showToast(`فشل سحب بيانات جوجل: ${err.message}`, "error");
+      showToast(`فشل سحب البيانات: ${err.message}`, "error");
     } finally {
       setApiLoading(false);
     }
@@ -1164,9 +1170,9 @@ export default function BookellaDashboard() {
                     type="button"
                     disabled={!title.trim() || apiLoading}
                     onClick={handleAutoFetch}
-                    className="px-4 bg-[#005AC1] hover:bg-[#00479e] text-white text-xs font-bold rounded-lg flex items-center gap-1 transition-all active:scale-95 disabled:opacity-40"
+                    className="px-4 bg-[#005AC1] hover:bg-[#00479e] text-white text-xs font-bold rounded-lg flex items-center gap-1 transition-all active:scale-95 disabled:opacity-40 whitespace-nowrap"
                   >
-                    {apiLoading ? "جار الجلب..." : "سحب جوجل"}
+                    {apiLoading ? "تحليل AI..." : "جلب ذكي (AI)"}
                   </button>
                 </div>
                 {isDuplicate && (
