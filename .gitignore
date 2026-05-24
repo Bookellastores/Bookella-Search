@@ -6,3 +6,6 @@ out/
 .DS_Store
 
 .vercel
+
+# بيانات مستخدمين محلية (كلمات مرور)
+src/data/users.json

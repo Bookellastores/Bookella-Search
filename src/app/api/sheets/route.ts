@@ -1,5 +1,18 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
+function buildCsvExportUrl(spreadsheetId: string, sheetName: string): string {
+  if (!sheetName.trim()) {
+    return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`;
+  }
+  // gviz يدعم اسم الورقة؛ export?format=csv يستخدم gid فقط
+  if (/^\d+$/.test(sheetName.trim())) {
+    return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${sheetName.trim()}`;
+  }
+  return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName.trim())}`;
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -13,116 +26,187 @@ export async function GET(request: Request) {
       );
     }
 
-    // Extract sheet ID from full URL if provided
     let spreadsheetId = spreadsheetIdInput.trim();
     if (spreadsheetId.includes("docs.google.com/spreadsheets")) {
       const match = spreadsheetId.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      if (match && match[1]) {
-        spreadsheetId = match[1];
-      }
+      if (match?.[1]) spreadsheetId = match[1];
     }
 
-    // Generate public CSV Export URL (accessible if "anyone with link can view" or published)
-    let csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`;
-    if (sheetName) {
-      csvUrl += `&sheet=${encodeURIComponent(sheetName)}`;
-    }
-
-    const response = await fetch(csvUrl, { cache: "no-store" });
+    const csvUrl = buildCsvExportUrl(spreadsheetId, sheetName);
+    const response = await fetch(csvUrl, {
+      cache: "no-store",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
 
     if (!response.ok) {
       return NextResponse.json(
-        { message: "فشل سحب البيانات. تأكد من أن ملف Google Sheet متاح للعرض العام (anyone with link can view) ومن صحة المعرف." },
+        {
+          message:
+            "فشل سحب البيانات. تأكد أن الملف «أي شخص لديه الرابط يمكنه العرض» وأن الرابط/المعرّف صحيح.",
+        },
         { status: 400 }
       );
     }
 
     const text = await response.text();
-    const rows = parseCSV(text);
-
-    if (rows.length === 0) {
+    if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
       return NextResponse.json(
-        { message: "لم نجد أي صفوف بيانات صالحة بجدول البيانات." },
-        { status: 200, headers: { "Content-Type": "application/json" } }
+        {
+          message:
+            "الملف غير متاح للتصدير. افتحي المشاركة واختياري «أي شخص لديه الرابط يمكنه العرض».",
+        },
+        { status: 400 }
       );
     }
 
-    const headers = rows[0].map(h => h.trim().toLowerCase());
+    const rows = parseCSV(text);
+    if (rows.length < 2) {
+      return NextResponse.json({
+        success: true,
+        spreadsheetId,
+        totalCount: 0,
+        books: [],
+        message: "لم نجد صفوف بيانات بعد صف العناوين.",
+      });
+    }
+
+    const headers = rows[0].map((h) => h.trim().toLowerCase());
     const dataRows = rows.slice(1);
 
-    // Map headers intelligently to support custom user columns (Arabic and English)
-    const titleIdx = findHeaderIndex(headers, ["اسم الكتاب", "العنوان", "title", "book name", "booktitle", "الاسم", "الكتب"]);
-    const authorIdx = findHeaderIndex(headers, ["الكاتب", "المؤلف", "author", "writer", "bookauthor"]);
-    const categoryIdx = findHeaderIndex(headers, ["التصنيف الرئيسي", "التصنيف", "القسم", "categoy", "category", "genre"]);
-    const originalPriceIdx = findHeaderIndex(headers, ["السعر الأصلي", "شراء", "الشراء", "original price", "cost", "buying price"]);
-    const priceIdx = findHeaderIndex(headers, ["السعر الموحد", "السعر", "البيع", "سعر البيع", "price", "selling price", "final price"]);
-    const quantityIdx = findHeaderIndex(headers, ["الكمية المتاحة", "الكمية", "العدد", "quantity", "copies", "qty", "stock"]);
-    const pageCountIdx = findHeaderIndex(headers, ["عدد الصفحات", "الصفحات", "pages", "page count", "pagescount"]);
-    const languageIdx = findHeaderIndex(headers, ["اللغة", "لغة الكتاب", "language", "lang"]);
-    const publisherIdx = findHeaderIndex(headers, ["الناشر", "دار النشر", "publisher", "house"]);
-    const coverUrlIdx = findHeaderIndex(headers, ["صورة الغلاف", "الغلاف", "رابط الغلاف", "cover", "image", "coverurl", "cover url", "image url"]);
-    const notesIdx = findHeaderIndex(headers, ["ملاحظات", "ملاحظة", "notes", "description", "الوصف", "وصف"]);
+    const titleIdx = findHeaderIndex(headers, [
+      "اسم الكتاب",
+      "العنوان",
+      "title",
+      "book name",
+      "booktitle",
+      "الاسم",
+    ]);
+    const authorIdx = findHeaderIndex(headers, [
+      "الكاتب",
+      "المؤلف",
+      "author",
+      "writer",
+    ]);
+    const categoryIdx = findHeaderIndex(headers, [
+      "التصنيف الرئيسي",
+      "التصنيف",
+      "category",
+      "genre",
+      "القسم",
+    ]);
+    const typeIdx = findHeaderIndex(headers, ["نوع الكتاب", "type"]);
+    const seriesIdx = findHeaderIndex(headers, ["اسم السلسلة", "series"]);
+    const subCatIdx = findHeaderIndex(headers, [
+      "تصنيفات فرعية",
+      "subcategories",
+      "sub categories",
+    ]);
+    const originalPriceIdx = findHeaderIndex(headers, [
+      "original price",
+      "السعر الأصلي",
+      "سعر الشراء",
+      "شراء",
+      "originalprice",
+      "purchase",
+    ]);
+    const priceIdx = findHeaderIndex(headers, [
+      "price",
+      "السعر",
+      "سعر البيع",
+      "السعر الموحد",
+      "sale",
+    ]);
+    const quantityIdx = findHeaderIndex(headers, [
+      "الكمية",
+      "quantity",
+      "qty",
+      "stock",
+    ]);
+    const pageCountIdx = findHeaderIndex(headers, [
+      "عدد الصفحات",
+      "pagecount",
+      "pages",
+    ]);
+    const languageIdx = findHeaderIndex(headers, ["لغة", "language", "lang"]);
+    const publisherIdx = findHeaderIndex(headers, [
+      "دار النشر",
+      "publisher",
+      "الناشر",
+    ]);
+    const isbnIdx = findHeaderIndex(headers, ["isbn", "ردمك", "barcode"]);
+    const coverUrlIdx = findHeaderIndex(headers, [
+      "رابط صورة الغلاف",
+      "coverurl",
+      "cover",
+      "image",
+    ]);
+    const notesIdx = findHeaderIndex(headers, [
+      "ملاحظات",
+      "notes",
+      "description",
+    ]);
+    const libraryIdx = findHeaderIndex(headers, [
+      "اسم المكتبة",
+      "library",
+      "libraryname",
+    ]);
+    const charIdx = findHeaderIndex(headers, ["الحرف", "chargroup"]);
 
-    const books = dataRows.map((row, rIdx) => {
-      const getVal = (idx: number, fallback: string = "") => {
-        if (idx === -1 || idx >= row.length) return fallback;
-        return row[idx].trim();
-      };
+    const books = dataRows
+      .map((row, rIdx) => {
+        const getVal = (idx: number, fallback = "") => {
+          if (idx === -1 || idx >= row.length) return fallback;
+          return row[idx].trim();
+        };
 
-      const title = getVal(titleIdx);
-      const author = getVal(authorIdx, "غير معروف");
-      const category = getVal(categoryIdx, "رواية");
-      const origPrice = parseFloat(getVal(originalPriceIdx)) || 40;
-      const quantity = parseInt(getVal(quantityIdx)) || 5;
-      const pageCount = parseInt(getVal(pageCountIdx)) || 250;
-      const language = getVal(languageIdx, "عربي");
-      const publisher = getVal(publisherIdx, "");
-      const coverUrl = getVal(coverUrlIdx, "");
-      const notes = getVal(notesIdx, "");
+        const title = getVal(titleIdx);
+        if (!title) return null;
 
-      // Premium Pricing Formula
-      let finalPrice = parseFloat(getVal(priceIdx)) || 0;
-      if (!finalPrice) {
-        if (origPrice < 30) finalPrice = 50;
-        else if (origPrice >= 40 && origPrice <= 50) finalPrice = origPrice + 15;
-        else if (origPrice >= 60 && origPrice <= 77) finalPrice = origPrice + 10;
-        else finalPrice = origPrice;
-      }
+        const origPrice = parseFloat(getVal(originalPriceIdx)) || 0;
+        const finalPrice = parseFloat(getVal(priceIdx)) || 0;
 
-      return {
-        id: `SHEETS-${Date.now()}-${rIdx}`,
-        charGroup: title ? title.charAt(0) : "ا",
-        title: title || "عنوان غير مسمى",
-        author,
-        category,
-        originalPrice: origPrice,
-        price: finalPrice,
-        quantity,
-        language,
-        publisher,
-        pageCount,
-        coverUrl,
-        notes,
-        libraryName: "Google Sheets"
-      };
-    }).filter(b => b.title && b.title !== "عنوان غير مسمى");
+        return {
+          id: getVal(0).startsWith("BOO-") ? getVal(0) : `SHEETS-${Date.now()}-${rIdx}`,
+          charGroup: getVal(charIdx) || title.charAt(0) || "ا",
+          title,
+          type: getVal(typeIdx) || "هاي كوبي",
+          author: getVal(authorIdx, "غير معروف"),
+          category: getVal(categoryIdx, "رواية"),
+          series: getVal(seriesIdx),
+          subCategories: getVal(subCatIdx),
+          originalPrice: origPrice,
+          price: finalPrice,
+          quantity: parseInt(getVal(quantityIdx), 10) || 5,
+          language: getVal(languageIdx, "عربي"),
+          publisher: getVal(publisherIdx),
+          pageCount: parseInt(getVal(pageCountIdx), 10) || 250,
+          isbn: getVal(isbnIdx),
+          coverUrl: getVal(coverUrlIdx),
+          notes: getVal(notesIdx),
+          libraryName: getVal(libraryIdx, "Google Sheets"),
+        };
+      })
+      .filter((b): b is NonNullable<typeof b> => Boolean(b));
 
     return NextResponse.json({
       success: true,
       spreadsheetId,
       totalCount: books.length,
-      books
+      books,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "خطأ غير معروف";
     console.error("Sheets sync error:", error);
     return NextResponse.json(
-      { message: "حدث خطأ فني أثناء قراءة رابط Google Sheets: " + error.message },
+      { message: "حدث خطأ فني أثناء قراءة Google Sheets: " + message },
       { status: 500 }
     );
   }
 }
 
-// Simple and strong CSV content parser
 function parseCSV(text: string): string[][] {
   const result: string[][] = [];
   let row: string[] = [];
@@ -136,43 +220,41 @@ function parseCSV(text: string): string[][] {
     if (char === '"') {
       if (inQuotes && nextChar === '"') {
         currentVal += '"';
-        i++; // skip next qualifier
+        i++;
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (char === ',' && !inQuotes) {
+    } else if (char === "," && !inQuotes) {
       row.push(currentVal);
       currentVal = "";
-    } else if ((char === '\r' || char === '\n') && !inQuotes) {
+    } else if ((char === "\r" || char === "\n") && !inQuotes) {
       row.push(currentVal);
-      if (row.length > 0 && row.some(item => item !== "")) {
+      if (row.length > 0 && row.some((item) => item !== "")) {
         result.push(row);
       }
       row = [];
       currentVal = "";
-      if (char === '\r' && nextChar === '\n') {
-        i++; // skip LF
-      }
+      if (char === "\r" && nextChar === "\n") i++;
     } else {
       currentVal += char;
     }
   }
 
-  // Push remaining elements if exists
   if (currentVal || row.length > 0) {
     row.push(currentVal);
-    if (row.some(item => item !== "")) {
-      result.push(row);
-    }
+    if (row.some((item) => item !== "")) result.push(row);
   }
 
   return result;
 }
 
 function findHeaderIndex(headers: string[], synonyms: string[]): number {
-  return headers.findIndex(header => 
-    synonyms.some(syn => 
-      header.includes(syn.toLowerCase()) || syn.toLowerCase().includes(header)
+  return headers.findIndex((header) =>
+    synonyms.some(
+      (syn) =>
+        header === syn.toLowerCase() ||
+        header.includes(syn.toLowerCase()) ||
+        syn.toLowerCase().includes(header)
     )
   );
 }
