@@ -286,6 +286,7 @@ export default function BookellaDashboard() {
   const [categoryFilter, setCategoryFilter] = useState("الكل");
   const [authorFilter, setAuthorFilter] = useState("الكل");
   const [priceLimit, setPriceLimit] = useState<number>(300);
+  const [inventoryMode, setInventoryMode] = useState<"all" | "original" | "highcopy">("all");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Notifications
@@ -1072,10 +1073,16 @@ export default function BookellaDashboard() {
       const matchesCategory = categoryFilter === "الكل" || b.category === categoryFilter;
       const matchesAuthor = authorFilter === "الكل" || b.author === authorFilter;
       const matchesPrice = b.price <= priceLimit;
+      const matchesInventoryMode =
+        inventoryMode === "all"
+          ? true
+          : inventoryMode === "original"
+            ? b.type === "أوريجينال"
+            : b.type !== "أوريجينال";
 
-      return matchesSearch && matchesCategory && matchesAuthor && matchesPrice;
+      return matchesSearch && matchesCategory && matchesAuthor && matchesPrice && matchesInventoryMode;
     });
-  }, [books, search, categoryFilter, authorFilter, priceLimit]);
+  }, [books, search, categoryFilter, authorFilter, priceLimit, inventoryMode]);
 
   // Derived Statistics 
   const totalUnique = books.length;
@@ -1421,13 +1428,14 @@ export default function BookellaDashboard() {
                 </button>
 
                 {/* Reset filters */}
-                {(search.trim() || categoryFilter !== "الكل" || authorFilter !== "الكل" || priceLimit < 300) && (
+                {(search.trim() || categoryFilter !== "الكل" || authorFilter !== "الكل" || priceLimit < 300 || inventoryMode !== "all") && (
                   <button
                     onClick={() => {
                       setSearch("");
                       setCategoryFilter("الكل");
                       setAuthorFilter("الكل");
                       setPriceLimit(300);
+                      setInventoryMode("all");
                     }}
                     className="text-xs text-red-600 font-bold hover:underline"
                   >
@@ -1496,6 +1504,28 @@ export default function BookellaDashboard() {
                 </div>
               </div>
             )}
+
+            {/* Inventory Mode Tabs */}
+            <div className="flex flex-wrap gap-2 items-center pt-1">
+              <span className="text-xs text-stone-500 font-bold leading-none ml-2">نوع المخزون:</span>
+              {[
+                { key: "all", label: "الكل" },
+                { key: "original", label: "أوريجينال (دور نشر)" },
+                { key: "highcopy", label: "هاي كوبي (أي مصدر)" },
+              ].map((mode) => (
+                <button
+                  key={mode.key}
+                  onClick={() => setInventoryMode(mode.key as "all" | "original" | "highcopy")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    inventoryMode === mode.key
+                      ? "bg-[#001D35] text-white"
+                      : "bg-[#F1F4F9] hover:bg-[#E2E2E6] text-stone-700"
+                  }`}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
 
             {/* Quick Category Tab Pills */}
             <div className="flex flex-wrap gap-2 items-center pt-2">
@@ -2399,7 +2429,7 @@ export default function BookellaDashboard() {
                 </span>
                 <div>
                   <h2 className="text-xl font-extrabold text-[#001D35]">البحث الموحد في المكتبات العالمية</h2>
-                  <p className="text-xs text-violet-600 font-bold mt-0.5">8 مكتبات عالمية — يكفي اسم الكتاب أو المؤلف أو ISBN</p>
+                  <p className="text-xs text-violet-600 font-bold mt-0.5">10 مصادر عالمية — يكفي اسم الكتاب أو المؤلف أو ISBN</p>
                 </div>
               </div>
               <button
@@ -2426,6 +2456,8 @@ export default function BookellaDashboard() {
                 { key: "wikidata", label: "Wikidata", icon: "🌐" },
                 { key: "loc", label: "Library of Congress", icon: "🇺🇸" },
                 { key: "bookbrainz", label: "BookBrainz", icon: "🧠" },
+                { key: "crossref", label: "Crossref", icon: "🧾" },
+                { key: "openalex", label: "OpenAlex", icon: "🎓" },
               ].map(src => (
                 <button
                   key={src.key}
@@ -2486,7 +2518,7 @@ export default function BookellaDashboard() {
                 <span className="text-xs font-bold text-violet-800">النتائج:</span>
                 {Object.entries(librarySourceSummary).map(([src, count]) => (
                   <span key={src} className="px-2.5 py-1 bg-white rounded-lg text-[10px] font-bold text-stone-700 border border-violet-100 flex items-center gap-1">
-                    {src === "Google Books" ? "📚" : src === "Open Library" ? "📖" : src === "IT Bookstore" ? "💻" : src === "Project Gutenberg" ? "📜" : src === "Internet Archive" ? "🏛️" : src === "Wikidata" ? "🌐" : src === "Library of Congress" ? "🇺🇸" : src === "BookBrainz" ? "🧠" : "📚"}
+                    {src === "Google Books" ? "📚" : src === "Open Library" ? "📖" : src === "IT Bookstore" ? "💻" : src === "Project Gutenberg" ? "📜" : src === "Internet Archive" ? "🏛️" : src === "Wikidata" ? "🌐" : src === "Library of Congress" ? "🇺🇸" : src === "BookBrainz" ? "🧠" : src === "Crossref" ? "🧾" : src === "OpenAlex" ? "🎓" : "📚"}
                     {src}: <span className="text-violet-700 font-black">{count}</span>
                   </span>
                 ))}
@@ -2503,7 +2535,7 @@ export default function BookellaDashboard() {
                   </div>
                   <div className="text-center">
                     <p className="text-sm font-bold text-stone-700">جاري البحث في المكتبات العالمية...</p>
-                    <p className="text-xs text-stone-400 mt-1">Google • Open Library • Gutenberg • Archive • Wikidata • LOC • BookBrainz • IT</p>
+                    <p className="text-xs text-stone-400 mt-1">Google • OpenLibrary • Gutenberg • Archive • Wikidata • LOC • BookBrainz • IT • Crossref • OpenAlex</p>
                   </div>
                 </div>
               ) : librarySearchResults.length === 0 ? (
@@ -2514,7 +2546,7 @@ export default function BookellaDashboard() {
                   <div className="text-center max-w-md">
                     <p className="font-extrabold text-stone-600 text-sm">ابدأ البحث الموحد في المكتبات</p>
                     <p className="text-xs text-stone-400 mt-2 leading-relaxed">
-                      اكتب اسم كتاب أو مؤلف أو ISBN — النظام يبحث في 8 مكتبات عالمية بالتوازي ويعرض أفضل النتائج
+                      اكتب اسم كتاب أو مؤلف أو ISBN — النظام يبحث في 10 مصادر بالتوازي ويعرض أفضل النتائج
                     </p>
                   </div>
                 </div>
@@ -2532,6 +2564,8 @@ export default function BookellaDashboard() {
                         wikidata: "Wikidata",
                         loc: "Library of Congress",
                         bookbrainz: "BookBrainz",
+                        crossref: "Crossref",
+                        openalex: "OpenAlex",
                       };
                       return b.source === sourceMap[librarySourceFilter];
                     })

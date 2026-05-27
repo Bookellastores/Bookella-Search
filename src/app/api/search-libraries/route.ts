@@ -16,6 +16,8 @@ const VALID_SOURCES = new Set<LibrarySourceKey | "all">([
   "wikidata",
   "loc",
   "bookbrainz",
+  "crossref",
+  "openalex",
 ]);
 
 export async function GET(request: Request) {

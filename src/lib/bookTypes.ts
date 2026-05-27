@@ -36,4 +36,6 @@ export type LibrarySourceKey =
   | "archive"
   | "wikidata"
   | "loc"
-  | "bookbrainz";
+  | "bookbrainz"
+  | "crossref"
+  | "openalex";

@@ -56,6 +56,16 @@ function langFromCode(code: string | undefined): string {
   return code;
 }
 
+function normalizeCover(url: string | undefined): string {
+  if (!url) return "";
+  return url.startsWith("http://") ? url.replace("http://", "https://") : url;
+}
+
+function fallbackCoverFromIsbn(isbn: string | undefined): string {
+  if (!isbn) return "";
+  return `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-L.jpg`;
+}
+
 function googleBooksKey(): string {
   return process.env.GOOGLE_BOOKS_API_KEY
     ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}`
@@ -72,8 +82,10 @@ export async function searchGoogleBooks(query: string, maxResults = 10): Promise
   return items.map((item, idx) => {
     const info = (item.volumeInfo || {}) as Record<string, unknown>;
     const imageLinks = info.imageLinks as Record<string, string> | undefined;
-    let thumb = imageLinks?.thumbnail || imageLinks?.smallThumbnail || "";
-    if (thumb.startsWith("http://")) thumb = thumb.replace("http://", "https://");
+    const isbn = extractISBN(info.industryIdentifiers as { type?: string; identifier?: string }[]);
+    const thumb = normalizeCover(
+      imageLinks?.thumbnail || imageLinks?.smallThumbnail || fallbackCoverFromIsbn(isbn)
+    );
 
     return {
       id: `google-${item.id || idx}`,
@@ -85,7 +97,7 @@ export async function searchGoogleBooks(query: string, maxResults = 10): Promise
       publisher: String(info.publisher || ""),
       coverUrl: thumb,
       description: String(info.description || "").slice(0, 300),
-      isbn: extractISBN(info.industryIdentifiers as { type?: string; identifier?: string }[]),
+      isbn,
       publishedDate: String(info.publishedDate || ""),
       source: "Google Books",
       sourceIcon: "📚",
@@ -115,7 +127,9 @@ export async function searchOpenLibrary(query: string, limit = 10): Promise<Unif
       pageCount: Number(doc.number_of_pages_median) || 0,
       language: detectLanguage(doc.language as string[] | undefined),
       publisher: Array.isArray(doc.publisher) ? String(doc.publisher[0]) : "",
-      coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : "",
+      coverUrl: coverId
+        ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`
+        : fallbackCoverFromIsbn(Array.isArray(doc.isbn) ? String(doc.isbn[0]) : ""),
       description: "",
       isbn: Array.isArray(doc.isbn) ? String(doc.isbn[0]) : "",
       publishedDate: doc.first_publish_year ? String(doc.first_publish_year) : "",
@@ -310,6 +324,85 @@ export async function searchBookBrainz(query: string): Promise<UnifiedBook[]> {
   });
 }
 
+export async function searchCrossref(query: string): Promise<UnifiedBook[]> {
+  const data = await safeFetchJson(
+    `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(query)}&rows=10&select=DOI,title,author,publisher,published-print,type,ISBN`
+  );
+  const items = (data?.message as { items?: Record<string, unknown>[] } | undefined)?.items;
+  if (!items?.length) return [];
+
+  return items
+    .filter((item) => String(item.type || "").includes("book"))
+    .map((item, idx) => {
+      const titles = item.title as string[] | undefined;
+      const authors = item.author as { given?: string; family?: string }[] | undefined;
+      const isbns = item.ISBN as string[] | undefined;
+      const isbn = isbns?.[0] || "";
+      const yearParts =
+        ((item["published-print"] as { "date-parts"?: number[][] } | undefined)?.["date-parts"] ||
+          [])[0] || [];
+      return {
+        id: `crossref-${item.DOI || idx}`,
+        title: titles?.[0] || "عنوان غير معروف",
+        author:
+          authors?.map((a) => [a.given, a.family].filter(Boolean).join(" ")).filter(Boolean).join("، ") ||
+          "مؤلف غير معروف",
+        category: "كتاب منشور",
+        pageCount: 0,
+        language: "",
+        publisher: String(item.publisher || ""),
+        coverUrl: fallbackCoverFromIsbn(isbn),
+        description: "",
+        isbn,
+        publishedDate: yearParts[0] ? String(yearParts[0]) : "",
+        source: "Crossref",
+        sourceIcon: "🧾",
+        previewLink: item.DOI ? `https://doi.org/${item.DOI}` : "",
+      };
+    });
+}
+
+export async function searchOpenAlexBooks(query: string): Promise<UnifiedBook[]> {
+  const data = await safeFetchJson(
+    `https://api.openalex.org/works?search=${encodeURIComponent(query)}&filter=type:book|book-chapter&per-page=10`
+  );
+  const results = data?.results as Record<string, unknown>[] | undefined;
+  if (!results?.length) return [];
+
+  return results.map((item, idx) => {
+    const authorships = item.authorships as
+      | { author?: { display_name?: string } }[]
+      | undefined;
+    const ids = item.ids as Record<string, string> | undefined;
+    const isbn = ids?.isbn || "";
+    const primaryLocation = item.primary_location as
+      | { source?: { display_name?: string } }
+      | undefined;
+
+    return {
+      id: `openalex-${item.id || idx}`,
+      title: String(item.display_name || "عنوان غير معروف"),
+      author:
+        authorships
+          ?.map((a) => a.author?.display_name)
+          .filter(Boolean)
+          .slice(0, 4)
+          .join("، ") || "مؤلف غير معروف",
+      category: "Academic Book",
+      pageCount: 0,
+      language: "",
+      publisher: primaryLocation?.source?.display_name || "",
+      coverUrl: fallbackCoverFromIsbn(isbn),
+      description: "",
+      isbn,
+      publishedDate: item.publication_year ? String(item.publication_year) : "",
+      source: "OpenAlex",
+      sourceIcon: "🎓",
+      previewLink: String(item.id || ""),
+    };
+  });
+}
+
 export const ALL_LIBRARY_SOURCES: {
   key: LibrarySourceKey;
   label: string;
@@ -324,6 +417,8 @@ export const ALL_LIBRARY_SOURCES: {
   { key: "wikidata", label: "Wikidata", icon: "🌐", search: searchWikidata },
   { key: "loc", label: "Library of Congress", icon: "🇺🇸", search: searchLibraryOfCongress },
   { key: "bookbrainz", label: "BookBrainz", icon: "🧠", search: searchBookBrainz },
+  { key: "crossref", label: "Crossref", icon: "🧾", search: searchCrossref },
+  { key: "openalex", label: "OpenAlex", icon: "🎓", search: searchOpenAlexBooks },
 ];
 
 export async function fetchBookMetadataFromLibraries(
