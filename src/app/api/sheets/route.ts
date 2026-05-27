@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizeAuthorName } from "@/lib/bookFormatters";
 
 export const dynamic = "force-dynamic";
 
@@ -165,7 +166,10 @@ export async function GET(request: Request) {
         const title = getVal(titleIdx);
         if (!title) return null;
 
-        const origPrice = parseFloat(getVal(originalPriceIdx)) || 0;
+        const samePriceColumn = originalPriceIdx !== -1 && originalPriceIdx === priceIdx;
+        const origPrice = samePriceColumn
+          ? 0
+          : parseFloat(getVal(originalPriceIdx)) || 0;
         const finalPrice = parseFloat(getVal(priceIdx)) || 0;
 
         return {
@@ -173,7 +177,7 @@ export async function GET(request: Request) {
           charGroup: getVal(charIdx) || title.charAt(0) || "ا",
           title,
           type: getVal(typeIdx) || "هاي كوبي",
-          author: getVal(authorIdx, "غير معروف"),
+          author: normalizeAuthorName(getVal(authorIdx, "غير معروف")),
           category: getVal(categoryIdx, "رواية"),
           series: getVal(seriesIdx),
           subCategories: getVal(subCatIdx),

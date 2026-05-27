@@ -8,5 +8,6 @@ export async function GET() {
     hasGemini: Boolean(process.env.GEMINI_API_KEY?.trim()),
     hasGoogleBooksServer: Boolean(process.env.GOOGLE_BOOKS_API_KEY?.trim()),
     hasGoogleBooksClient: Boolean(process.env.NEXT_PUBLIC_GOOGLE_BOOKS_API_KEY?.trim()),
+    hasMongo: Boolean(process.env.MONGODB_URI?.trim()),
   });
 }

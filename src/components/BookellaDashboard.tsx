@@ -7,7 +7,8 @@ import {
   fetchAllBooksClient,
   searchLibrariesClient,
 } from "@/lib/bookSourcesClient";
-import { fallbackCoverFromIsbn } from "@/lib/bookSourceUtils";
+import { generateNextBookId, normalizeAuthorName } from "@/lib/bookFormatters";
+import { mergeBookFillMissing, mergeBookWithMetadata } from "@/lib/inventoryMerge";
 import type {
   BookSearchMode,
   EnrichedBookMetadata,
@@ -68,7 +69,18 @@ interface Book {
   notes: string;
   isbn: string;
   libraryName: string;
+  lastRefreshedAt?: number;
 }
+
+type SortKey =
+  | "title"
+  | "author"
+  | "category"
+  | "priceAsc"
+  | "priceDesc"
+  | "id"
+  | "quantity";
+type BatchRefreshSize = 50 | 100 | 200 | "all";
 
 const normalizeTypeValue = (value?: string): "أوريجينال" | "هاي كوبي" => {
   const normalized = (value || "")
@@ -236,36 +248,83 @@ export default function BookellaDashboard() {
   // Inventory Books state
   const [books, setBooks] = useState<Book[]>(INITIAL_BOOKS.map((b) => normalizeStoredBook(b)));
   
-  // LocalStorage Persistence Client-side effect
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  const persistBooks = async (nextBooks: Book[], immediate = false) => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("bookella_books", JSON.stringify(nextBooks));
+    if (!immediate && !hasHydrated) return;
+    try {
+      await fetch("/api/inventory", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ books: nextBooks }),
+      });
+    } catch {
+      /* يبقى الحفظ المحلي */
+    }
+  };
+
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    const load = async () => {
+      let mongoBooks: Book[] | null = null;
+      let localBooks: Book[] | null = null;
+
+      try {
+        const res = await fetch("/api/inventory", { cache: "no-store" });
+        const data = await res.json();
+        if (res.ok && Array.isArray(data.books) && data.books.length > 0) {
+          mongoBooks = data.books.map((b: Book) => normalizeStoredBook(b));
+          if (data.storage === "mongodb") setStorageMode("mongodb");
+        }
+      } catch {
+        /* fallback local */
+      }
+
       const stored = localStorage.getItem("bookella_books");
-          if (stored) {
+      if (stored) {
         try {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            setBooks(parsed.map((b: Book) => normalizeStoredBook(b)));
-          } else {
-            setBooks(INITIAL_BOOKS.map((b) => normalizeStoredBook(b)));
+            localBooks = parsed.map((b: Book) => normalizeStoredBook(b));
           }
         } catch (e) {
           console.error("Failed to parse persisted books", e);
         }
       }
-    }
+
+      let loaded: Book[] | null = null;
+      if (mongoBooks?.length && localBooks?.length) {
+        loaded = localBooks.length >= mongoBooks.length ? localBooks : mongoBooks;
+        setStorageMode(localBooks.length > mongoBooks.length ? "hybrid" : "mongodb");
+      } else {
+        loaded = localBooks ?? mongoBooks;
+        if (mongoBooks?.length) setStorageMode("mongodb");
+        else if (localBooks?.length) setStorageMode("local");
+      }
+
+      if (loaded?.length) {
+        setBooks(loaded);
+        if (localBooks && mongoBooks && localBooks.length > mongoBooks.length) {
+          void fetch("/api/inventory", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ books: loaded }),
+          });
+        }
+      }
+      setHasHydrated(true);
+    };
+    load();
   }, []);
 
-  const [hasHydrated, setHasHydrated] = useState(false);
-
   useEffect(() => {
-    if (typeof window !== "undefined" && hasHydrated) {
-      localStorage.setItem("bookella_books", JSON.stringify(books));
-    }
+    if (!hasHydrated) return;
+    const timer = setTimeout(() => {
+      void persistBooks(books);
+    }, 800);
+    return () => clearTimeout(timer);
   }, [books, hasHydrated]);
-
-  useEffect(() => {
-    setHasHydrated(true);
-  }, []);
 
   useEffect(() => {
     fetch("/api/books-config")
@@ -285,7 +344,10 @@ export default function BookellaDashboard() {
   const [sheetUrl, setSheetUrl] = useState("");
   const [sheetName, setSheetName] = useState("");
   const [sheetsLoading, setSheetsLoading] = useState(false);
-  const [sheetsMergeMode, setSheetsMergeMode] = useState<"merge" | "replace">("merge");
+  const [sheetsMergeMode, setSheetsMergeMode] = useState<"merge" | "replace" | "fillMissing">("fillMissing");
+  const [sheetDefaultType, setSheetDefaultType] = useState<"أوريجينال" | "هاي كوبي">("هاي كوبي");
+  const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(new Set());
+  const [storageMode, setStorageMode] = useState<"local" | "mongodb" | "hybrid">("local");
 
   // Google Books Explorer state declarations
   const [isExplorerOpen, setIsExplorerOpen] = useState(false);
@@ -307,7 +369,7 @@ export default function BookellaDashboard() {
   const [authorFilter, setAuthorFilter] = useState("الكل");
   const [priceLimit, setPriceLimit] = useState<number>(300);
   const [inventoryMode, setInventoryMode] = useState<"all" | "original" | "highcopy">("all");
-  const [sortBy, setSortBy] = useState<"title" | "priceAsc" | "priceDesc">("title");
+  const [sortBy, setSortBy] = useState<SortKey>("title");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Notifications
@@ -417,38 +479,6 @@ export default function BookellaDashboard() {
     return metadata;
   };
 
-  const mergeBookWithMetadata = (
-    book: Book,
-    meta: EnrichedBookMetadata
-  ): Book => {
-    const nextTitle = meta.title?.trim() || book.title;
-    return {
-      ...book,
-      charGroup: nextTitle.charAt(0) || book.charGroup,
-      title: nextTitle,
-      author:
-        meta.author &&
-        meta.author !== "غير معروف" &&
-        meta.author !== "مؤلف غير معروف"
-          ? meta.author
-          : book.author,
-      category: meta.category || book.category,
-      pageCount: meta.pageCount > 0 ? meta.pageCount : book.pageCount,
-      coverUrl:
-        meta.coverImage ||
-        book.coverUrl ||
-        fallbackCoverFromIsbn(meta.isbn || book.isbn),
-      publisher: meta.publisher || book.publisher,
-      language: meta.language || book.language,
-      notes: meta.arabicSummary || book.notes,
-      isbn: meta.isbn || book.isbn,
-      originalPrice: book.originalPrice,
-      price: book.price,
-      discountedPrice: book.discountedPrice,
-      quantity: book.quantity,
-    };
-  };
-
   const applyEnrichedMetadata = (data: {
     title?: string;
     author?: string;
@@ -551,21 +581,49 @@ export default function BookellaDashboard() {
     }
   };
 
-  /** تحديث بيانات مجموعة كتب من المكتبات دون تغيير الأسعار */
-  const handleRefreshBooksByType = async (target: "all" | "original" | "highcopy") => {
-    const booksToRefresh = books.filter((b) => {
+  const pickBooksForSmartRefresh = (
+    pool: Book[],
+    limit: BatchRefreshSize,
+    onlySelected: boolean
+  ): Book[] => {
+    let candidates = pool;
+    if (onlySelected && selectedBookIds.size > 0) {
+      candidates = pool.filter((b) => selectedBookIds.has(b.id));
+    }
+    candidates = [...candidates].sort(
+      (a, b) => (a.lastRefreshedAt || 0) - (b.lastRefreshedAt || 0)
+    );
+    if (limit === "all") return candidates;
+    return candidates.slice(0, limit);
+  };
+
+  const runBatchRefresh = async (
+    target: "all" | "original" | "highcopy",
+    batchSize: BatchRefreshSize
+  ) => {
+    const pool = books.filter((b) => {
       if (target === "all") return true;
       return target === "original" ? isOriginalBook(b) : !isOriginalBook(b);
     });
+    const booksToRefresh = pickBooksForSmartRefresh(
+      pool,
+      batchSize,
+      selectedBookIds.size > 0
+    );
+
     if (booksToRefresh.length === 0) {
-      const targetLabel =
-        target === "original" ? "الأوريجينال" : target === "highcopy" ? "الهاي كوبي" : "الجرد";
-      showToast(`لا توجد كتب ${targetLabel} لتحديثها`, "info");
+      showToast("لا توجد كتب مطابقة للتحديث", "info");
       return;
     }
+
+    const label =
+      batchSize === "all"
+        ? `الكل (${booksToRefresh.length})`
+        : `الدفعة التالية (${booksToRefresh.length})`;
+
     if (
       !window.confirm(
-        `سيتم تحديث بيانات ${booksToRefresh.length} كتاب (${target === "all" ? "كل الجرد" : target === "original" ? "أوريجينال" : "هاي كوبي"}) من المكتبات.\nالأسعار لن تتغير.\n\nهل تريدين المتابعة؟`
+        `تحديث ذكي: ${label}\nلن يُعاد تحديث نفس الدفعة إلا بعد دفعات أخرى.\nالأسعار والبيانات الموجودة لن تُمس.\n\nمتابعة؟`
       )
     ) {
       return;
@@ -577,8 +635,8 @@ export default function BookellaDashboard() {
     let skipped = 0;
 
     try {
-      const nextBooks = [...books];
-      const indexMap = new Map(books.map((b, idx) => [b.id, idx]));
+      let nextBooks = [...books];
+      const indexMap = () => new Map(nextBooks.map((b, idx) => [b.id, idx]));
 
       for (let i = 0; i < booksToRefresh.length; i++) {
         const book = booksToRefresh[i];
@@ -594,13 +652,11 @@ export default function BookellaDashboard() {
         try {
           const meta = await resolveBookMetadata(
             query,
-            target === "original" ? "publisher" : "all"
+            target === "original" || isOriginalBook(book) ? "publisher" : "all"
           );
-          if (meta) {
-            const originalIndex = indexMap.get(book.id);
-            if (originalIndex !== undefined) {
-              nextBooks[originalIndex] = mergeBookWithMetadata(book, meta);
-            }
+          const idx = indexMap().get(book.id);
+          if (meta && idx !== undefined) {
+            nextBooks[idx] = mergeBookWithMetadata(book, meta);
             updated++;
           } else {
             skipped++;
@@ -609,28 +665,34 @@ export default function BookellaDashboard() {
           skipped++;
         }
 
+        setBooks(nextBooks);
+        await persistBooks(nextBooks, true);
+
         if (i < booksToRefresh.length - 1) {
-          await new Promise((r) => setTimeout(r, 700));
+          await new Promise((r) => setTimeout(r, 500));
         }
       }
 
-      setBooks(nextBooks);
       showToast(
-        `اكتمل التحديث: ${updated} كتاب محدّث، ${skipped} بدون نتائج جديدة`,
+        `تم حفظ ${updated} كتاب فوراً (${skipped} بدون نتائج جديدة)`,
         updated > 0 ? "success" : "info"
       );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "خطأ غير معروف";
-      showToast(`فشل التحديث الجماعي: ${message}`, "error");
+      showToast(`فشل التحديث: ${message}`, "error");
     } finally {
       setRefreshAllLoading(false);
       setRefreshProgress({ current: 0, total: 0 });
     }
   };
 
-  const handleRefreshAllBooks = () => handleRefreshBooksByType("all");
-  const handleRefreshOriginalBooks = () => handleRefreshBooksByType("original");
-  const handleRefreshHighCopyBooks = () => handleRefreshBooksByType("highcopy");
+  const handleRefreshAllBooks = () => runBatchRefresh("all", "all");
+  const handleSmartBatch50 = () => runBatchRefresh("all", 50);
+  const handleSmartBatch100 = () => runBatchRefresh("all", 100);
+  const handleSmartBatch200 = () => runBatchRefresh("all", 200);
+  const handleRefreshOriginalBooks = () => runBatchRefresh("original", "all");
+  const handleRefreshHighCopyBooks = () => runBatchRefresh("highcopy", "all");
+  const handleRefreshSelected = () => runBatchRefresh("all", "all");
 
   const handleRefreshSingleBook = async (book: Book) => {
     setRefreshingBookId(book.id);
@@ -651,9 +713,11 @@ export default function BookellaDashboard() {
         return;
       }
 
-      setBooks((prev) =>
-        prev.map((b) => (b.id === book.id ? mergeBookWithMetadata(b, meta) : b))
-      );
+      setBooks((prev) => {
+        const next = prev.map((b) => (b.id === book.id ? mergeBookWithMetadata(b, meta) : b));
+        void persistBooks(next, true);
+        return next;
+      });
       showToast(`تم تحديث بيانات «${book.title}» — الأسعار كما أدخلتها`, "success");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "خطأ غير معروف";
@@ -673,6 +737,7 @@ export default function BookellaDashboard() {
     const updated = normalizeStoredBook({
       ...editingBook,
       title: editingBook.title.trim(),
+      author: normalizeAuthorName(editingBook.author),
       charGroup: editingBook.title.trim().charAt(0) || editingBook.charGroup,
       originalPrice: Number(editingBook.originalPrice) || 0,
       price: Number(editingBook.price) || 0,
@@ -703,7 +768,7 @@ export default function BookellaDashboard() {
         const importedBooks = (data.books as Book[]).map((b) =>
           normalizeStoredBook({
             ...b,
-            type: b.type || "هاي كوبي",
+            type: normalizeTypeValue(b.type || sheetDefaultType),
             series: b.series ?? "",
             subCategories: b.subCategories ?? "",
           })
@@ -726,29 +791,26 @@ export default function BookellaDashboard() {
                 b.title.trim().toLowerCase() === newBook.title.trim().toLowerCase()
             );
             if (index > -1) {
-              mergedList[index] = normalizeStoredBook({
-                ...mergedList[index],
-                author: newBook.author || mergedList[index].author,
-                category: newBook.category || mergedList[index].category,
-                series: newBook.series || mergedList[index].series,
-                subCategories:
-                  newBook.subCategories || mergedList[index].subCategories,
-                originalPrice: newBook.originalPrice,
-                price: newBook.price,
-                quantity: newBook.quantity,
-                language: newBook.language || mergedList[index].language,
-                publisher: newBook.publisher || mergedList[index].publisher,
-                pageCount: newBook.pageCount || mergedList[index].pageCount,
-                isbn: newBook.isbn || mergedList[index].isbn,
-                coverUrl: newBook.coverUrl || mergedList[index].coverUrl,
-                notes: newBook.notes || mergedList[index].notes,
-                libraryName: newBook.libraryName || "Google Sheets",
-              });
+              mergedList[index] =
+                sheetsMergeMode === "fillMissing"
+                  ? normalizeStoredBook(
+                      mergeBookFillMissing(mergedList[index], newBook)
+                    )
+                  : normalizeStoredBook({
+                      ...mergedList[index],
+                      ...newBook,
+                      id: mergedList[index].id,
+                      originalPrice:
+                        newBook.originalPrice > 0
+                          ? newBook.originalPrice
+                          : mergedList[index].originalPrice,
+                      price: newBook.price > 0 ? newBook.price : mergedList[index].price,
+                    });
               updatedCount++;
             } else {
               mergedList.push({
                 ...newBook,
-                id: `BOO-SHEET-${Date.now()}-${addedCount}`,
+                id: generateNextBookId([...mergedList, ...importedBooks]),
               });
               addedCount++;
             }
@@ -756,7 +818,9 @@ export default function BookellaDashboard() {
 
           setBooks(mergedList);
           showToast(
-            `مزامنة Google Sheets: ${addedCount} جديد، ${updatedCount} محدّث`,
+            sheetsMergeMode === "fillMissing"
+              ? `شيت: ${addedCount} جديد، ${updatedCount} بحقول ناقصة فقط`
+              : `مزامنة Google Sheets: ${addedCount} جديد، ${updatedCount} محدّث`,
             "success"
           );
         }
@@ -1002,7 +1066,7 @@ export default function BookellaDashboard() {
     }
 
     const newBook: Book = {
-      id: `BOO-${Date.now()}`,
+      id: generateNextBookId(books),
       charGroup: title.trim().charAt(0),
       title: title.trim(),
       type: bookType,
@@ -1143,10 +1207,34 @@ export default function BookellaDashboard() {
     sorted.sort((a, b) => {
       if (sortBy === "priceAsc") return a.price - b.price;
       if (sortBy === "priceDesc") return b.price - a.price;
+      if (sortBy === "author") return a.author.localeCompare(b.author, "ar");
+      if (sortBy === "category") return a.category.localeCompare(b.category, "ar");
+      if (sortBy === "id") return a.id.localeCompare(b.id, "ar");
+      if (sortBy === "quantity") return (b.quantity || 0) - (a.quantity || 0);
       return a.title.localeCompare(b.title, "ar");
     });
     return sorted;
   }, [books, search, categoryFilter, authorFilter, priceLimit, inventoryMode, sortBy]);
+
+  const toggleBookSelection = (id: string) => {
+    setSelectedBookIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllFiltered = () => {
+    const ids = filteredBooks.map((b) => b.id);
+    const allSelected = ids.length > 0 && ids.every((id) => selectedBookIds.has(id));
+    setSelectedBookIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  };
 
   // Derived Statistics 
   const totalUnique = books.length;
@@ -1331,6 +1419,15 @@ export default function BookellaDashboard() {
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight text-[#001D35]">Bookella Console</h1>
                 <p className="text-xs text-[#005AC1] font-bold tracking-wider mt-0.5">منصة الجرد والتسعير الموحد</p>
+                <p className="text-[10px] text-stone-500 mt-1 flex items-center gap-1">
+                  <Database className="w-3 h-3" />
+                  التخزين:{" "}
+                  {storageMode === "mongodb"
+                    ? "MongoDB + محلي"
+                    : storageMode === "hybrid"
+                      ? "محلي (مزامنة مع السحابة)"
+                      : "محلي في المتصفح"}
+                </p>
                 <div className="flex flex-wrap gap-2 mt-2">
                   <Link href="/books" className="text-[10px] font-bold px-2 py-1 rounded-lg bg-[#F1F4F9] border border-[#E1E2EC] hover:bg-white">
                     مكتبة الكتب
@@ -1403,15 +1500,52 @@ export default function BookellaDashboard() {
             </button>
             <button
               type="button"
+              onClick={handleSmartBatch50}
+              disabled={refreshAllLoading || books.length === 0}
+              className="px-3 py-2 bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold disabled:opacity-40"
+              title="تحديث 50 كتاب التالية (لم تُحدَّث مؤخراً) — حفظ فوري"
+            >
+              {refreshAllLoading ? `${refreshProgress.current}/${refreshProgress.total}` : "50"}
+            </button>
+            <button
+              type="button"
+              onClick={handleSmartBatch100}
+              disabled={refreshAllLoading || books.length === 0}
+              className="px-3 py-2 bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold disabled:opacity-40"
+              title="تحديث 100 كتاب التالية"
+            >
+              100
+            </button>
+            <button
+              type="button"
+              onClick={handleSmartBatch200}
+              disabled={refreshAllLoading || books.length === 0}
+              className="px-3 py-2 bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold disabled:opacity-40"
+              title="تحديث 200 كتاب التالية"
+            >
+              200
+            </button>
+            <button
+              type="button"
+              onClick={handleRefreshSelected}
+              disabled={refreshAllLoading || selectedBookIds.size === 0}
+              className="px-4 py-2 bg-orange-50 hover:bg-orange-100/80 text-orange-900 border border-orange-200 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all disabled:opacity-40"
+              title="تحديث الكتب المحددة فقط"
+            >
+              <Check className="w-3.5 h-3.5" />
+              تحديث المحدد ({selectedBookIds.size})
+            </button>
+            <button
+              type="button"
               onClick={handleRefreshAllBooks}
               disabled={refreshAllLoading || books.length === 0}
               className="px-4 py-2 bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all active:scale-95 disabled:opacity-40"
-              title="تحديث العناوين والمؤلفين وISBN من المكتبات — الأسعار تبقى كما هي"
+              title="تحديث كل الجرد — الأسعار تبقى كما هي"
             >
               <RefreshCw className={`w-3.5 h-3.5 text-amber-600 ${refreshAllLoading ? "animate-spin" : ""}`} />
               {refreshAllLoading && refreshProgress.total > 0
                 ? `تحديث ${refreshProgress.current}/${refreshProgress.total}`
-                : "تحديث كل البيانات"}
+                : "تحديث الكل"}
             </button>
             <button
               type="button"
@@ -1467,8 +1601,9 @@ export default function BookellaDashboard() {
           <div className="bg-[#E2E2E6] p-5 rounded-2xl border border-[#E1E2EC] flex items-center gap-4">
             <div className="p-3 bg-white/50 text-[#1A1C1E] rounded-xl"><TrendingUp className="w-6 h-6" /></div>
             <div>
-              <p className="text-[#1A1C1E] text-xs font-bold opacity-80">إجمالي النسخ بالجرد</p>
+              <p className="text-[#1A1C1E] text-xs font-bold opacity-80">إجمالي النسخ (مجموع الكميات)</p>
               <h3 className="text-2xl font-black text-[#1A1C1E] mt-1">{books.reduce((acc, b) => acc + (b.quantity || 5), 0)}</h3>
+              <p className="text-[10px] text-stone-500 mt-0.5">{inventoryStats.total} عنوان · ليس عدد العناوين</p>
             </div>
           </div>
           <div className="bg-[#D3E4FF] p-5 rounded-2xl border border-[#E1E2EC] flex items-center gap-4">
@@ -1513,12 +1648,16 @@ export default function BookellaDashboard() {
                 <select
                   id="sort-by"
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as "title" | "priceAsc" | "priceDesc")}
+                  onChange={(e) => setSortBy(e.target.value as SortKey)}
                   className="w-full px-3 py-2 bg-[#F1F4F9] border border-[#E1E2EC] rounded-xl text-xs font-bold text-[#1A1C1E]"
                 >
-                  <option value="title">ترتيب: الاسم</option>
-                  <option value="priceAsc">ترتيب: السعر ↑</option>
-                  <option value="priceDesc">ترتيب: السعر ↓</option>
+                  <option value="title">ترتيب: اسم الكتاب</option>
+                  <option value="author">ترتيب: الكاتب</option>
+                  <option value="category">ترتيب: التصنيف</option>
+                  <option value="id">ترتيب: Book ID</option>
+                  <option value="quantity">ترتيب: الكمية</option>
+                  <option value="priceAsc">ترتيب: سعر البيع ↑</option>
+                  <option value="priceDesc">ترتيب: سعر البيع ↓</option>
                 </select>
               </div>
 
@@ -1671,6 +1810,19 @@ export default function BookellaDashboard() {
               <table className="w-full text-right text-sm">
                 <thead>
                   <tr className="bg-[#F8F9FF] border-b border-[#E1E2EC] text-stone-500 font-bold">
+                    <th className="py-4 px-3 w-10">
+                      <input
+                        type="checkbox"
+                        aria-label="تحديد كل الكتب الظاهرة"
+                        checked={
+                          filteredBooks.length > 0 &&
+                          filteredBooks.every((b) => selectedBookIds.has(b.id))
+                        }
+                        onChange={toggleSelectAllFiltered}
+                        className="accent-[#005AC1] w-4 h-4 cursor-pointer"
+                      />
+                    </th>
+                    <th className="py-4 px-4">Book ID</th>
                     <th className="py-4 px-6">الغلاف</th>
                     <th className="py-4 px-6">اسم الكتاب</th>
                     <th className="py-4 px-6">النوع</th>
@@ -1685,7 +1837,17 @@ export default function BookellaDashboard() {
                 </thead>
                 <tbody className="divide-y divide-[#E1E2EC]">
                   {filteredBooks.map(b => (
-                    <tr key={b.id} className="hover:bg-blue-50/20 transition-all group">
+                    <tr key={b.id} className={`hover:bg-blue-50/20 transition-all group ${selectedBookIds.has(b.id) ? "bg-blue-50/40" : ""}`}>
+                      <td className="py-4 px-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedBookIds.has(b.id)}
+                          onChange={() => toggleBookSelection(b.id)}
+                          aria-label={`تحديد ${b.title}`}
+                          className="accent-[#005AC1] w-4 h-4 cursor-pointer"
+                        />
+                      </td>
+                      <td className="py-4 px-4 font-mono text-[11px] text-stone-500">{b.id}</td>
                       <td className="py-4 px-6">
                         <div className="w-10 h-14 rounded-md border border-[#E1E2EC] overflow-hidden bg-[#F1F4F9] flex items-center justify-center text-[10px] font-bold text-[#005AC1] text-center shadow-inner">
                           {b.coverUrl ? (
@@ -2083,6 +2245,19 @@ export default function BookellaDashboard() {
               </div>
 
               <div>
+                <label htmlFor="edit-book-id" className="block text-xs font-bold text-stone-600 mb-1">
+                  Book ID
+                </label>
+                <input
+                  id="edit-book-id"
+                  type="text"
+                  value={editingBook.id}
+                  onChange={(e) => setEditingBook({ ...editingBook, id: e.target.value.trim() })}
+                  className="w-full px-3 py-2 border border-[#E1E2EC] rounded-xl text-sm font-mono ltr"
+                />
+              </div>
+
+              <div>
                 <label htmlFor="edit-book-type" className="block text-xs font-bold text-stone-600 mb-1">
                   نوع الكتاب
                 </label>
@@ -2370,28 +2545,74 @@ export default function BookellaDashboard() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-stone-700">آلية مزامنة المخزون</label>
+                    <label className="block text-xs font-bold text-stone-700">نوع الكتب من الشيت (إن لم يُذكر في الملف)</label>
                     <div className="flex bg-[#F1F4F9] rounded-xl p-1 border border-[#E1E2EC]">
                       <button
                         type="button"
-                        onClick={() => setSheetsMergeMode("merge")}
+                        onClick={() => setSheetDefaultType("هاي كوبي")}
                         className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                          sheetsMergeMode === "merge" ? "bg-white text-emerald-800 shadow-sm" : "text-stone-500 hover:text-stone-800"
+                          sheetDefaultType === "هاي كوبي"
+                            ? "bg-white text-violet-800 shadow-sm"
+                            : "text-stone-500"
                         }`}
                       >
-                        دمج ذكي وتحديث
+                        هاي كوبي
                       </button>
                       <button
                         type="button"
-                        onClick={() => setSheetsMergeMode("replace")}
+                        onClick={() => setSheetDefaultType("أوريجينال")}
                         className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                          sheetsMergeMode === "replace" ? "bg-white text-red-750 shadow-sm" : "text-stone-500 hover:text-stone-800"
+                          sheetDefaultType === "أوريجينال"
+                            ? "bg-white text-emerald-800 shadow-sm"
+                            : "text-stone-500"
                         }`}
                       >
-                        استبدال الجرد تماماً
+                        أوريجينال
                       </button>
                     </div>
                   </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-stone-700">آلية مزامنة المخزون</label>
+                  <div className="flex flex-wrap bg-[#F1F4F9] rounded-xl p-1 border border-[#E1E2EC] gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setSheetsMergeMode("fillMissing")}
+                      className={`flex-1 min-w-[120px] py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        sheetsMergeMode === "fillMissing"
+                          ? "bg-white text-emerald-800 shadow-sm"
+                          : "text-stone-500 hover:text-stone-800"
+                      }`}
+                    >
+                      حقول ناقصة فقط
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSheetsMergeMode("merge")}
+                      className={`flex-1 min-w-[120px] py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        sheetsMergeMode === "merge"
+                          ? "bg-white text-emerald-800 shadow-sm"
+                          : "text-stone-500 hover:text-stone-800"
+                      }`}
+                    >
+                      دمج وتحديث
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSheetsMergeMode("replace")}
+                      className={`flex-1 min-w-[120px] py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        sheetsMergeMode === "replace"
+                          ? "bg-white text-red-700 shadow-sm"
+                          : "text-stone-500 hover:text-stone-800"
+                      }`}
+                    >
+                      استبدال الجرد
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-stone-500">
+                    «حقول ناقصة فقط» لا يغيّر بيانات موجودة — يملأ الفراغات ويفصل سعر الشراء عن البيع.
+                  </p>
                 </div>
               </div>
 

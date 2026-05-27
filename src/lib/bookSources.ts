@@ -2,6 +2,7 @@
  * Server-side book library search (for API routes / deployment).
  * On machines with SSL issues, the dashboard uses bookSourcesClient instead.
  */
+import { buildPublisherSearchQueries } from "./arabicPublishers";
 import { mergeToEnrichedMetadata } from "./bookMetadataMerge";
 import type { EnrichedBookMetadata, LibrarySourceKey, UnifiedBook } from "./bookTypes";
 
@@ -518,12 +519,18 @@ export const PUBLISHER_LIBRARY_KEYS = new Set<LibrarySourceKey>([
 
 export async function fetchBookMetadataFromLibraries(
   title: string,
-  sourceFilter: LibrarySourceKey | "all" = "all"
+  sourceFilter: LibrarySourceKey | "all" = "all",
+  publisherHint?: string
 ): Promise<EnrichedBookMetadata | null> {
   const { books } = await searchAllLibraries(title, sourceFilter);
   if (/[\u0600-\u06FF]/.test(title)) {
     const ar = await searchGoogleBooks(`${title} lang:ar`, 5);
     books.push(...ar);
+  }
+  const publisherQueries = buildPublisherSearchQueries(title, publisherHint);
+  for (const pq of publisherQueries) {
+    const pubHits = await searchGoogleBooks(pq, 3);
+    books.push(...pubHits);
   }
   return mergeToEnrichedMetadata(books, title);
 }
