@@ -2,7 +2,12 @@
  * Client-side book library search (runs in the browser — avoids server SSL issues).
  */
 import { mergeToEnrichedMetadata } from "./bookMetadataMerge";
-import type { EnrichedBookMetadata, LibrarySourceKey, UnifiedBook } from "./bookTypes";
+import type {
+  BookSearchMode,
+  EnrichedBookMetadata,
+  LibrarySourceKey,
+  UnifiedBook,
+} from "./bookTypes";
 
 async function safeFetchJson(url: string, timeoutMs = 12000): Promise<Record<string, unknown> | null> {
   const controller = new AbortController();
@@ -241,6 +246,75 @@ export async function searchCrossrefClient(query: string): Promise<UnifiedBook[]
     });
 }
 
+export async function searchNYPLClient(query: string): Promise<UnifiedBook[]> {
+  const data = await safeFetchJson(
+    `https://api.repo.nypl.org/api/v2/items/search?q=${encodeURIComponent(query)}&per_page=8`
+  );
+  const result = (data?.nyplAPI as { response?: { result?: Record<string, unknown>[] } })?.response
+    ?.result;
+  if (!result?.length) return [];
+
+  return result.map((item, idx) => {
+    const uuid = String(item.uuid || idx);
+    const imageId = item.image_id as string | undefined;
+    return {
+      id: `nypl-${uuid}`,
+      title: String(item.title || "عنوان غير معروف"),
+      author: "—",
+      category: "مكتبة نيويورك العامة",
+      pageCount: 0,
+      language: "",
+      publisher: "NYPL",
+      coverUrl: imageId ? `https://images.nypl.org/index.php?id=${imageId}&t=r` : "",
+      description: "",
+      isbn: "",
+      publishedDate: "",
+      source: "NYPL",
+      sourceIcon: "🗽",
+      previewLink: `https://digitalcollections.nypl.org/items/${uuid}`,
+    };
+  });
+}
+
+export async function searchDPLAClient(query: string): Promise<UnifiedBook[]> {
+  const data = await safeFetchJson(
+    `https://api.dp.la/v2/items?q=${encodeURIComponent(query)}&page_size=8`
+  );
+  const docs = (data?.docs as Record<string, unknown>[]) || [];
+  if (!docs.length) return [];
+
+  return docs
+    .map((doc, idx) => {
+      const sourceResource = (doc.sourceResource || {}) as Record<string, unknown>;
+      const titleField = sourceResource.title;
+      const title = Array.isArray(titleField)
+        ? String(titleField[0] || "")
+        : String(titleField || "");
+      if (!title) return null;
+      const identifier = sourceResource.identifier as Record<string, unknown> | undefined;
+      const isbn = Array.isArray(identifier?.isbn)
+        ? String((identifier?.isbn as string[])[0])
+        : String(identifier?.isbn || "");
+      return {
+        id: `dpla-${doc.id || idx}`,
+        title,
+        author: "مؤلف غير معروف",
+        category: "أرشيف رقمي",
+        pageCount: 0,
+        language: "",
+        publisher: "",
+        coverUrl: fallbackCoverFromIsbn(isbn),
+        description: "",
+        isbn,
+        publishedDate: "",
+        source: "DPLA",
+        sourceIcon: "🇺🇸",
+        previewLink: String(doc.isShownAt || ""),
+      };
+    })
+    .filter((b): b is UnifiedBook => Boolean(b));
+}
+
 export async function searchOpenAlexClient(query: string): Promise<UnifiedBook[]> {
   const data = await safeFetchJson(
     `https://api.openalex.org/works?search=${encodeURIComponent(query)}&filter=type:book|book-chapter&per-page=10`
@@ -290,11 +364,26 @@ const CLIENT_SOURCES: {
   { key: "wikidata", search: searchWikidataClient },
   { key: "crossref", search: searchCrossrefClient },
   { key: "openalex", search: searchOpenAlexClient },
+  { key: "nypl", search: searchNYPLClient },
+  { key: "dpla", search: searchDPLAClient },
 ];
 
-/** جلب كل النتائ الخام من المكتبات (للدمج مع السيرفر + Gemini). */
-export async function fetchAllBooksClient(title: string): Promise<UnifiedBook[]> {
-  const results = await Promise.allSettled(CLIENT_SOURCES.map((s) => s.search(title)));
+const PUBLISHER_CLIENT_KEYS = new Set<LibrarySourceKey>([
+  "google",
+  "openlibrary",
+  "crossref",
+]);
+
+/** جلب كل النتائج الخام من المكتبات (للدمج مع السيرفر + Gemini). */
+export async function fetchAllBooksClient(
+  title: string,
+  mode: BookSearchMode = "all"
+): Promise<UnifiedBook[]> {
+  const sources =
+    mode === "publisher"
+      ? CLIENT_SOURCES.filter((s) => PUBLISHER_CLIENT_KEYS.has(s.key))
+      : CLIENT_SOURCES;
+  const results = await Promise.allSettled(sources.map((s) => s.search(title)));
   const allBooks: UnifiedBook[] = [];
   results.forEach((r) => {
     if (r.status === "fulfilled" && r.value?.length) allBooks.push(...r.value);
@@ -337,6 +426,8 @@ export async function searchLibrariesClient(
     bookbrainz: "BookBrainz",
     crossref: "Crossref",
     openalex: "OpenAlex",
+    nypl: "NYPL",
+    dpla: "DPLA",
   };
 
   const results = await Promise.allSettled(sources.map((s) => s.search(query)));

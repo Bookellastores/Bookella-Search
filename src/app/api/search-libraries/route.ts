@@ -19,6 +19,8 @@ const VALID_SOURCES = new Set<LibrarySourceKey | "all">([
   "bookbrainz",
   "crossref",
   "openalex",
+  "nypl",
+  "dpla",
 ]);
 
 export async function GET(request: Request) {

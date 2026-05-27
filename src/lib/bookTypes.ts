@@ -38,4 +38,8 @@ export type LibrarySourceKey =
   | "loc"
   | "bookbrainz"
   | "crossref"
-  | "openalex";
+  | "openalex"
+  | "nypl"
+  | "dpla";
+
+export type BookSearchMode = "all" | "publisher";

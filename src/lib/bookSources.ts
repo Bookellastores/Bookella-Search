@@ -362,6 +362,90 @@ export async function searchCrossref(query: string): Promise<UnifiedBook[]> {
     });
 }
 
+export async function searchNYPL(query: string): Promise<UnifiedBook[]> {
+  const data = await safeFetchJson(
+    `https://api.repo.nypl.org/api/v2/items/search?q=${encodeURIComponent(query)}&per_page=10`
+  );
+  const result = (data?.nyplAPI as { response?: { result?: Record<string, unknown>[] } })?.response
+    ?.result;
+  if (!result?.length) return [];
+
+  return result.map((item, idx) => {
+    const uuid = String(item.uuid || idx);
+    const title = String(item.title || "عنوان غير معروف");
+    const imageId = item.image_id as string | undefined;
+    return {
+      id: `nypl-${uuid}`,
+      title,
+      author: "—",
+      category: "مكتبة نيويورك العامة",
+      pageCount: 0,
+      language: "",
+      publisher: "NYPL",
+      coverUrl: imageId
+        ? `https://images.nypl.org/index.php?id=${imageId}&t=r`
+        : "",
+      description: "",
+      isbn: "",
+      publishedDate: "",
+      source: "NYPL",
+      sourceIcon: "🗽",
+      previewLink: `https://digitalcollections.nypl.org/items/${uuid}`,
+    };
+  });
+}
+
+export async function searchDPLA(query: string): Promise<UnifiedBook[]> {
+  const data = await safeFetchJson(
+    `https://api.dp.la/v2/items?q=${encodeURIComponent(query)}&page_size=10`
+  );
+  const docs = (data?.docs as Record<string, unknown>[]) || [];
+  if (!docs.length) return [];
+
+  return docs
+    .map((doc, idx) => {
+      const sourceResource = (doc.sourceResource || {}) as Record<string, unknown>;
+      const titleField = sourceResource.title;
+      const title = Array.isArray(titleField)
+        ? String(titleField[0] || "")
+        : String(titleField || "");
+      if (!title) return null;
+
+      const creator = sourceResource.creator;
+      const author = Array.isArray(creator)
+        ? (creator as string[]).join("، ")
+        : String(creator || "مؤلف غير معروف");
+
+      const identifier = sourceResource.identifier as Record<string, unknown> | undefined;
+      const isbn = Array.isArray(identifier?.isbn)
+        ? String((identifier?.isbn as string[])[0])
+        : String(identifier?.isbn || "");
+
+      const publisher = sourceResource.publisher;
+      const publisherName = Array.isArray(publisher)
+        ? String(publisher[0] || "")
+        : String(publisher || "");
+
+      return {
+        id: `dpla-${doc.id || idx}`,
+        title,
+        author,
+        category: "أرشيف رقمي",
+        pageCount: 0,
+        language: "",
+        publisher: publisherName,
+        coverUrl: fallbackCoverFromIsbn(isbn),
+        description: "",
+        isbn,
+        publishedDate: "",
+        source: "DPLA",
+        sourceIcon: "🇺🇸",
+        previewLink: String(doc.isShownAt || doc.object || ""),
+      };
+    })
+    .filter((b): b is UnifiedBook => Boolean(b));
+}
+
 export async function searchOpenAlexBooks(query: string): Promise<UnifiedBook[]> {
   const data = await safeFetchJson(
     `https://api.openalex.org/works?search=${encodeURIComponent(query)}&filter=type:book|book-chapter&per-page=10`
@@ -419,7 +503,18 @@ export const ALL_LIBRARY_SOURCES: {
   { key: "bookbrainz", label: "BookBrainz", icon: "🧠", search: searchBookBrainz },
   { key: "crossref", label: "Crossref", icon: "🧾", search: searchCrossref },
   { key: "openalex", label: "OpenAlex", icon: "🎓", search: searchOpenAlexBooks },
+  { key: "nypl", label: "NYPL", icon: "🗽", search: searchNYPL },
+  { key: "dpla", label: "DPLA", icon: "🇺🇸", search: searchDPLA },
 ];
+
+/** مصادر مناسبة لكتب الأوريجينال (دور نشر / فهارس رسمية). */
+export const PUBLISHER_LIBRARY_KEYS = new Set<LibrarySourceKey>([
+  "google",
+  "openlibrary",
+  "crossref",
+  "loc",
+  "bookbrainz",
+]);
 
 export async function fetchBookMetadataFromLibraries(
   title: string,

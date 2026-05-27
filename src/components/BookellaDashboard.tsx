@@ -1,12 +1,18 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
+import Link from "next/link";
 import { mergeToEnrichedMetadata } from "@/lib/bookMetadataMerge";
 import {
   fetchAllBooksClient,
   searchLibrariesClient,
 } from "@/lib/bookSourcesClient";
-import type { EnrichedBookMetadata, LibrarySourceKey } from "@/lib/bookTypes";
+import { fallbackCoverFromIsbn } from "@/lib/bookSourceUtils";
+import type {
+  BookSearchMode,
+  EnrichedBookMetadata,
+  LibrarySourceKey,
+} from "@/lib/bookTypes";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { 
   BookOpen, 
@@ -234,11 +240,13 @@ export default function BookellaDashboard() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("bookella_books");
-      if (stored) {
+          if (stored) {
         try {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
             setBooks(parsed.map((b: Book) => normalizeStoredBook(b)));
+          } else {
+            setBooks(INITIAL_BOOKS.map((b) => normalizeStoredBook(b)));
           }
         } catch (e) {
           console.error("Failed to parse persisted books", e);
@@ -299,6 +307,7 @@ export default function BookellaDashboard() {
   const [authorFilter, setAuthorFilter] = useState("الكل");
   const [priceLimit, setPriceLimit] = useState<number>(300);
   const [inventoryMode, setInventoryMode] = useState<"all" | "original" | "highcopy">("all");
+  const [sortBy, setSortBy] = useState<"title" | "priceAsc" | "priceDesc">("title");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Notifications
@@ -311,6 +320,7 @@ export default function BookellaDashboard() {
   const [refreshingBookId, setRefreshingBookId] = useState<string | null>(null);
   
   // New book Form states
+  const [bookType, setBookType] = useState<"أوريجينال" | "هاي كوبي">("هاي كوبي");
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [category, setCategory] = useState("رواية");
@@ -366,6 +376,7 @@ export default function BookellaDashboard() {
   }, [title, books]);
 
   const resetAddBookForm = () => {
+    setBookType("هاي كوبي");
     setTitle("");
     setAuthor("");
     setCategory("رواية");
@@ -381,9 +392,10 @@ export default function BookellaDashboard() {
   };
 
   const resolveBookMetadata = async (
-    query: string
+    query: string,
+    mode: BookSearchMode = "all"
   ): Promise<EnrichedBookMetadata | null> => {
-    const clientBooks = await fetchAllBooksClient(query);
+    const clientBooks = await fetchAllBooksClient(query, mode);
     let metadata = mergeToEnrichedMetadata(clientBooks, query);
 
     try {
@@ -422,7 +434,10 @@ export default function BookellaDashboard() {
           : book.author,
       category: meta.category || book.category,
       pageCount: meta.pageCount > 0 ? meta.pageCount : book.pageCount,
-      coverUrl: meta.coverImage || book.coverUrl,
+      coverUrl:
+        meta.coverImage ||
+        book.coverUrl ||
+        fallbackCoverFromIsbn(meta.isbn || book.isbn),
       publisher: meta.publisher || book.publisher,
       language: meta.language || book.language,
       notes: meta.arabicSummary || book.notes,
@@ -504,7 +519,10 @@ export default function BookellaDashboard() {
         "info"
       );
 
-      const metadata = await resolveBookMetadata(query);
+      const metadata = await resolveBookMetadata(
+        query,
+        bookType === "أوريجينال" ? "publisher" : "all"
+      );
 
       if (!metadata) {
         showToast(
@@ -574,7 +592,10 @@ export default function BookellaDashboard() {
             .trim();
 
         try {
-          const meta = await resolveBookMetadata(query);
+          const meta = await resolveBookMetadata(
+            query,
+            target === "original" ? "publisher" : "all"
+          );
           if (meta) {
             const originalIndex = indexMap.get(book.id);
             if (originalIndex !== undefined) {
@@ -621,7 +642,10 @@ export default function BookellaDashboard() {
           .join(" ")
           .trim();
 
-      const meta = await resolveBookMetadata(query);
+      const meta = await resolveBookMetadata(
+        query,
+        isOriginalBook(book) ? "publisher" : "all"
+      );
       if (!meta) {
         showToast(`لم نجد بيانات محدّثة لـ «${book.title}»`, "info");
         return;
@@ -981,7 +1005,7 @@ export default function BookellaDashboard() {
       id: `BOO-${Date.now()}`,
       charGroup: title.trim().charAt(0),
       title: title.trim(),
-      type: "هاي كوبي",
+      type: bookType,
       author: author.trim() || "غير معروف",
       category: category.trim(),
       series: series.trim(),
@@ -1088,8 +1112,14 @@ export default function BookellaDashboard() {
   };
 
   // Filter and real-time query search logic
+  const inventoryStats = useMemo(() => {
+    const original = books.filter((b) => isOriginalBook(b)).length;
+    const highCopy = books.length - original;
+    return { original, highCopy, total: books.length };
+  }, [books]);
+
   const filteredBooks = useMemo(() => {
-    return books.filter(b => {
+    const filtered = books.filter((b) => {
       // Real-time search: filters by Title and Author
       const matchesSearch = !search.trim() || 
         b.title.toLowerCase().includes(search.toLowerCase()) || 
@@ -1108,7 +1138,15 @@ export default function BookellaDashboard() {
 
       return matchesSearch && matchesCategory && matchesAuthor && matchesPrice && matchesInventoryMode;
     });
-  }, [books, search, categoryFilter, authorFilter, priceLimit, inventoryMode]);
+
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      if (sortBy === "priceAsc") return a.price - b.price;
+      if (sortBy === "priceDesc") return b.price - a.price;
+      return a.title.localeCompare(b.title, "ar");
+    });
+    return sorted;
+  }, [books, search, categoryFilter, authorFilter, priceLimit, inventoryMode, sortBy]);
 
   // Derived Statistics 
   const totalUnique = books.length;
@@ -1293,6 +1331,17 @@ export default function BookellaDashboard() {
               <div>
                 <h1 className="text-3xl font-extrabold tracking-tight text-[#001D35]">Bookella Console</h1>
                 <p className="text-xs text-[#005AC1] font-bold tracking-wider mt-0.5">منصة الجرد والتسعير الموحد</p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <Link href="/books" className="text-[10px] font-bold px-2 py-1 rounded-lg bg-[#F1F4F9] border border-[#E1E2EC] hover:bg-white">
+                    مكتبة الكتب
+                  </Link>
+                  <Link href="/books/original" className="text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 hover:bg-emerald-100">
+                    أوريجينال
+                  </Link>
+                  <Link href="/books/high-copy" className="text-[10px] font-bold px-2 py-1 rounded-lg bg-violet-50 border border-violet-200 text-violet-800 hover:bg-violet-100">
+                    هاي كوبي
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
@@ -1409,7 +1458,10 @@ export default function BookellaDashboard() {
             <div className="p-3 bg-white/50 text-[#001D35] rounded-xl"><BookMarked className="w-6 h-6" /></div>
             <div>
               <p className="text-[#001D35] text-xs font-bold opacity-80">العناوين المقيدة</p>
-              <h3 className="text-2xl font-black text-[#001D35] mt-1">{totalUnique}</h3>
+              <h3 className="text-2xl font-black text-[#001D35] mt-1">{inventoryStats.total}</h3>
+              <p className="text-[10px] text-[#005AC1] font-bold mt-1">
+                أوريجينال {inventoryStats.original} · هاي كوبي {inventoryStats.highCopy}
+              </p>
             </div>
           </div>
           <div className="bg-[#E2E2E6] p-5 rounded-2xl border border-[#E1E2EC] flex items-center gap-4">
@@ -1454,6 +1506,20 @@ export default function BookellaDashboard() {
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-11 pr-4 py-2 bg-[#F1F4F9] border border-[#E1E2EC] rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-[#005AC1] focus:bg-white transition-all text-[#1A1C1E]"
                 />
+              </div>
+
+              <div className="w-full md:w-44">
+                <label htmlFor="sort-by" className="sr-only">ترتيب الجدول</label>
+                <select
+                  id="sort-by"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as "title" | "priceAsc" | "priceDesc")}
+                  className="w-full px-3 py-2 bg-[#F1F4F9] border border-[#E1E2EC] rounded-xl text-xs font-bold text-[#1A1C1E]"
+                >
+                  <option value="title">ترتيب: الاسم</option>
+                  <option value="priceAsc">ترتيب: السعر ↑</option>
+                  <option value="priceDesc">ترتيب: السعر ↓</option>
+                </select>
               </div>
 
               {/* Toggle Advanced filter pill */}
@@ -1607,6 +1673,7 @@ export default function BookellaDashboard() {
                   <tr className="bg-[#F8F9FF] border-b border-[#E1E2EC] text-stone-500 font-bold">
                     <th className="py-4 px-6">الغلاف</th>
                     <th className="py-4 px-6">اسم الكتاب</th>
+                    <th className="py-4 px-6">النوع</th>
                     <th className="py-4 px-6">الكاتب</th>
                     <th className="py-4 px-6">التصنيف الرئيسي</th>
                     <th className="py-4 px-6 text-center">عدد الصفحات</th>
@@ -1629,6 +1696,17 @@ export default function BookellaDashboard() {
                         </div>
                       </td>
                       <td className="py-4 px-6 font-semibold group-hover:text-[#005AC1] transition-colors">{b.title}</td>
+                      <td className="py-4 px-6">
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                            isOriginalBook(b)
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                              : "bg-violet-100 text-violet-800 border border-violet-200"
+                          }`}
+                        >
+                          {b.type}
+                        </span>
+                      </td>
                       <td className="py-4 px-6 text-stone-600">{b.author}</td>
                       <td className="py-4 px-6">
                         <span className="px-2.5 py-1 text-xs font-bold bg-[#FDF1BA] text-[#5D4037] rounded-md">
@@ -1766,6 +1844,20 @@ export default function BookellaDashboard() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="book-type" className="block text-xs font-bold text-stone-600 mb-1">
+                    نوع الكتاب
+                  </label>
+                  <select
+                    id="book-type"
+                    value={bookType}
+                    onChange={(e) => setBookType(e.target.value as "أوريجينال" | "هاي كوبي")}
+                    className="w-full px-3 py-2 border border-[#E1E2EC] rounded-xl text-sm font-bold focus:outline-none focus:ring-1 focus:ring-[#005AC1]"
+                  >
+                    <option value="هاي كوبي">هاي كوبي (أي مصدر)</option>
+                    <option value="أوريجينال">أوريجينال (دور نشر)</option>
+                  </select>
+                </div>
                 <div>
                   <label htmlFor="book-author" className="block text-xs font-bold text-stone-600 mb-1">
                     الكاتب
@@ -1988,6 +2080,26 @@ export default function BookellaDashboard() {
                   <RefreshCw className={`w-3.5 h-3.5 ${refreshingBookId === editingBook.id ? "animate-spin" : ""}`} />
                   تحديث البيانات (بدون أسعار)
                 </button>
+              </div>
+
+              <div>
+                <label htmlFor="edit-book-type" className="block text-xs font-bold text-stone-600 mb-1">
+                  نوع الكتاب
+                </label>
+                <select
+                  id="edit-book-type"
+                  value={editingBook.type}
+                  onChange={(e) =>
+                    setEditingBook({
+                      ...editingBook,
+                      type: normalizeTypeValue(e.target.value),
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-[#E1E2EC] rounded-xl text-sm font-bold"
+                >
+                  <option value="هاي كوبي">هاي كوبي</option>
+                  <option value="أوريجينال">أوريجينال</option>
+                </select>
               </div>
 
               <div>
@@ -2475,7 +2587,7 @@ export default function BookellaDashboard() {
                 </span>
                 <div>
                   <h2 className="text-xl font-extrabold text-[#001D35]">البحث الموحد في المكتبات العالمية</h2>
-                  <p className="text-xs text-violet-600 font-bold mt-0.5">10 مصادر عالمية — يكفي اسم الكتاب أو المؤلف أو ISBN</p>
+                  <p className="text-xs text-violet-600 font-bold mt-0.5">12 مصدر عالمي — يكفي اسم الكتاب أو المؤلف أو ISBN</p>
                 </div>
               </div>
               <button
@@ -2504,6 +2616,8 @@ export default function BookellaDashboard() {
                 { key: "bookbrainz", label: "BookBrainz", icon: "🧠" },
                 { key: "crossref", label: "Crossref", icon: "🧾" },
                 { key: "openalex", label: "OpenAlex", icon: "🎓" },
+                { key: "nypl", label: "NYPL", icon: "🗽" },
+                { key: "dpla", label: "DPLA", icon: "🇺🇸" },
               ].map(src => (
                 <button
                   key={src.key}
@@ -2581,7 +2695,7 @@ export default function BookellaDashboard() {
                   </div>
                   <div className="text-center">
                     <p className="text-sm font-bold text-stone-700">جاري البحث في المكتبات العالمية...</p>
-                    <p className="text-xs text-stone-400 mt-1">Google • OpenLibrary • Gutenberg • Archive • Wikidata • LOC • BookBrainz • IT • Crossref • OpenAlex</p>
+                    <p className="text-xs text-stone-400 mt-1">Google • OpenLibrary • Gutenberg • Archive • Wikidata • LOC • BookBrainz • IT • Crossref • OpenAlex • NYPL • DPLA</p>
                   </div>
                 </div>
               ) : librarySearchResults.length === 0 ? (
@@ -2592,7 +2706,7 @@ export default function BookellaDashboard() {
                   <div className="text-center max-w-md">
                     <p className="font-extrabold text-stone-600 text-sm">ابدأ البحث الموحد في المكتبات</p>
                     <p className="text-xs text-stone-400 mt-2 leading-relaxed">
-                      اكتب اسم كتاب أو مؤلف أو ISBN — النظام يبحث في 10 مصادر بالتوازي ويعرض أفضل النتائج
+                      اكتب اسم كتاب أو مؤلف أو ISBN — النظام يبحث في 12 مصدر بالتوازي ويعرض أفضل النتائج
                     </p>
                   </div>
                 </div>
@@ -2612,6 +2726,8 @@ export default function BookellaDashboard() {
                         bookbrainz: "BookBrainz",
                         crossref: "Crossref",
                         openalex: "OpenAlex",
+                        nypl: "NYPL",
+                        dpla: "DPLA",
                       };
                       return b.source === sourceMap[librarySourceFilter];
                     })

@@ -3,7 +3,18 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     min-height: 100vh;
+    background-color: #f8f9ff;
+  }
+
+  ::selection {
+    background: #d6e3ff;
+    color: #001d35;
   }
 }
+

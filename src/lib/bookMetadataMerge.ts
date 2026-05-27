@@ -1,4 +1,5 @@
 import type { EnrichedBookMetadata, UnifiedBook } from "./bookTypes";
+import { fallbackCoverFromIsbn, pickBestCover } from "./bookSourceUtils";
 
 function similarity(a: string, b: string): number {
   const na = a.toLowerCase().trim();
@@ -48,9 +49,10 @@ export function mergeToEnrichedMetadata(
   const pool = sameTitle.length ? sameTitle : books;
   const sourcesUsed = Array.from(new Set(pool.map((b) => b.source)));
 
+  const mergedIsbn = firstNonEmpty(...pool.map((b) => b.isbn), best.isbn);
   const coverCandidates = pool.map((b) => b.coverUrl).filter((u) => u && u.length > 10);
-  const preferredCover = coverCandidates.find((u) => !u.includes("archive.org/services/img"));
-  const coverImage = preferredCover || coverCandidates[0] || best.coverUrl || null;
+  const coverImage =
+    pickBestCover([...coverCandidates, best.coverUrl], mergedIsbn) || null;
 
   const description = firstNonEmpty(...pool.map((b) => b.description));
   const arabicSummary = description
