@@ -107,18 +107,24 @@ const fetchGoodreads = async (query: string): Promise<BookInfo[]> => {
   if (!res.ok) return [];
   const text = await res.text();
   // Very light parsing – extract title and author via regex (fallback).
-  const matches = [...text.matchAll(/<best_book>.*?<title>(.*?)<\/title>.*?<author>.*?<name>(.*?)<\/name>.*?<image_url>(.*?)<\/image_url>/gs)];
-  return matches.map((m) => ({
-    title: m[1] || "",
-    authors: m[2] || "",
-    coverUrl: m[3] || "",
-    publisher: "",
-    isbn: "",
-    description: "",
-    pageCount: 0,
-    language: "",
-    source: "Goodreads",
-  } as BookInfo));
+  // Very light parsing – extract title and author via regex (fallback).
+  const regex = /<best_book>[\s\S]*?<title>(.*?)<\/title>[\s\S]*?<author>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<image_url>(.*?)<\/image_url>/g;
+  const matches: BookInfo[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(text)) !== null) {
+    matches.push({
+      title: m[1] || "",
+      authors: m[2] || "",
+      coverUrl: m[3] || "",
+      publisher: "",
+      isbn: "",
+      description: "",
+      pageCount: 0,
+      language: "",
+      source: "Goodreads",
+    } as BookInfo);
+  }
+  return matches;
 };
 
 // Amazon Product Advertising – requires REACT_APP_AMAZON_PA_KEY and SECRET (omitted for brevity).
