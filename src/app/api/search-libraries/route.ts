@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from 'next/server';
+
+import {
+  type LibrarySourceKey,
+  searchAllLibraries,
+} from '@/lib/bookSources';
 
 export const dynamic = "force-dynamic";
-import {
-  searchAllLibraries,
-  type LibrarySourceKey,
-} from "@/lib/bookSources";
 
 const VALID_SOURCES = new Set<LibrarySourceKey | "all">([
   "all",

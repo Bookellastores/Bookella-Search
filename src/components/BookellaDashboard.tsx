@@ -64,8 +64,20 @@ interface Book {
   libraryName: string;
 }
 
+const normalizeTypeValue = (value?: string): "أوريجينال" | "هاي كوبي" => {
+  const normalized = (value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[أإآ]/g, "ا");
+  const originalTokens = ["اوريجينال", "اوريجنال", "original", "orig"];
+  return originalTokens.some((token) => normalized.includes(token)) ? "أوريجينال" : "هاي كوبي";
+};
+
+const isOriginalBook = (book: Pick<Book, "type">): boolean => normalizeTypeValue(book.type) === "أوريجينال";
+
 const normalizeStoredBook = (b: Book & { isbn?: string }): Book => ({
   ...b,
+  type: normalizeTypeValue(b.type),
   isbn: b.isbn ?? "",
 });
 
@@ -216,7 +228,7 @@ export default function BookellaDashboard() {
   const { data: session, status } = useSession();
 
   // Inventory Books state
-  const [books, setBooks] = useState<Book[]>(INITIAL_BOOKS);
+  const [books, setBooks] = useState<Book[]>(INITIAL_BOOKS.map((b) => normalizeStoredBook(b)));
   
   // LocalStorage Persistence Client-side effect
   useEffect(() => {
@@ -521,31 +533,38 @@ export default function BookellaDashboard() {
     }
   };
 
-  /** تحديث بيانات كل الكتب من المكتبات دون تغيير الأسعار */
-  const handleRefreshAllBooks = async () => {
-    if (books.length === 0) {
-      showToast("لا توجد كتب لتحديثها", "info");
+  /** تحديث بيانات مجموعة كتب من المكتبات دون تغيير الأسعار */
+  const handleRefreshBooksByType = async (target: "all" | "original" | "highcopy") => {
+    const booksToRefresh = books.filter((b) => {
+      if (target === "all") return true;
+      return target === "original" ? isOriginalBook(b) : !isOriginalBook(b);
+    });
+    if (booksToRefresh.length === 0) {
+      const targetLabel =
+        target === "original" ? "الأوريجينال" : target === "highcopy" ? "الهاي كوبي" : "الجرد";
+      showToast(`لا توجد كتب ${targetLabel} لتحديثها`, "info");
       return;
     }
     if (
       !window.confirm(
-        `سيتم تحديث بيانات ${books.length} كتاب (عنوان، مؤلف، ISBN، غلاف...) من المكتبات.\nالأسعار لن تتغير.\n\nهل تريدين المتابعة؟`
+        `سيتم تحديث بيانات ${booksToRefresh.length} كتاب (${target === "all" ? "كل الجرد" : target === "original" ? "أوريجينال" : "هاي كوبي"}) من المكتبات.\nالأسعار لن تتغير.\n\nهل تريدين المتابعة؟`
       )
     ) {
       return;
     }
 
     setRefreshAllLoading(true);
-    setRefreshProgress({ current: 0, total: books.length });
+    setRefreshProgress({ current: 0, total: booksToRefresh.length });
     let updated = 0;
     let skipped = 0;
 
     try {
       const nextBooks = [...books];
+      const indexMap = new Map(books.map((b, idx) => [b.id, idx]));
 
-      for (let i = 0; i < books.length; i++) {
-        const book = books[i];
-        setRefreshProgress({ current: i + 1, total: books.length });
+      for (let i = 0; i < booksToRefresh.length; i++) {
+        const book = booksToRefresh[i];
+        setRefreshProgress({ current: i + 1, total: booksToRefresh.length });
 
         const query =
           book.isbn?.trim() ||
@@ -557,7 +576,10 @@ export default function BookellaDashboard() {
         try {
           const meta = await resolveBookMetadata(query);
           if (meta) {
-            nextBooks[i] = mergeBookWithMetadata(book, meta);
+            const originalIndex = indexMap.get(book.id);
+            if (originalIndex !== undefined) {
+              nextBooks[originalIndex] = mergeBookWithMetadata(book, meta);
+            }
             updated++;
           } else {
             skipped++;
@@ -566,7 +588,7 @@ export default function BookellaDashboard() {
           skipped++;
         }
 
-        if (i < books.length - 1) {
+        if (i < booksToRefresh.length - 1) {
           await new Promise((r) => setTimeout(r, 700));
         }
       }
@@ -584,6 +606,10 @@ export default function BookellaDashboard() {
       setRefreshProgress({ current: 0, total: 0 });
     }
   };
+
+  const handleRefreshAllBooks = () => handleRefreshBooksByType("all");
+  const handleRefreshOriginalBooks = () => handleRefreshBooksByType("original");
+  const handleRefreshHighCopyBooks = () => handleRefreshBooksByType("highcopy");
 
   const handleRefreshSingleBook = async (book: Book) => {
     setRefreshingBookId(book.id);
@@ -1015,7 +1041,7 @@ export default function BookellaDashboard() {
           id: `BOO-CSV-${Date.now()}-${i}`,
           charGroup: bTitle.charAt(0),
           title: bTitle,
-          type: cols[3] || "هاي كوبي",
+          type: normalizeTypeValue(cols[3] || "هاي كوبي"),
           author: cols[4] || "غير معروف",
           category: cols[5] || "رواية",
           series: cols[6] || "",
@@ -1031,7 +1057,7 @@ export default function BookellaDashboard() {
           isbn: cols[15] || "",
           libraryName: cols[18] || cols[17] || "مستورد من ملف"
         };
-        newBooks.push(nb);
+        newBooks.push(normalizeStoredBook(nb));
         added++;
       }
       setBooks([...books, ...newBooks]);
@@ -1077,8 +1103,8 @@ export default function BookellaDashboard() {
         inventoryMode === "all"
           ? true
           : inventoryMode === "original"
-            ? b.type === "أوريجينال"
-            : b.type !== "أوريجينال";
+            ? isOriginalBook(b)
+            : !isOriginalBook(b);
 
       return matchesSearch && matchesCategory && matchesAuthor && matchesPrice && matchesInventoryMode;
     });
@@ -1337,6 +1363,26 @@ export default function BookellaDashboard() {
               {refreshAllLoading && refreshProgress.total > 0
                 ? `تحديث ${refreshProgress.current}/${refreshProgress.total}`
                 : "تحديث كل البيانات"}
+            </button>
+            <button
+              type="button"
+              onClick={handleRefreshOriginalBooks}
+              disabled={refreshAllLoading || books.filter((b) => isOriginalBook(b)).length === 0}
+              className="px-4 py-2 bg-emerald-50 hover:bg-emerald-100/80 text-emerald-900 border border-emerald-200 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all active:scale-95 disabled:opacity-40"
+              title="تحديث كتب الأوريجينال فقط دون تغيير الأسعار"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${refreshAllLoading ? "animate-spin" : ""}`} />
+              تحديث الأوريجينال
+            </button>
+            <button
+              type="button"
+              onClick={handleRefreshHighCopyBooks}
+              disabled={refreshAllLoading || books.filter((b) => !isOriginalBook(b)).length === 0}
+              className="px-4 py-2 bg-sky-50 hover:bg-sky-100/80 text-sky-900 border border-sky-200 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all active:scale-95 disabled:opacity-40"
+              title="تحديث كتب الهاي كوبي فقط دون تغيير الأسعار"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-sky-600 ${refreshAllLoading ? "animate-spin" : ""}`} />
+              تحديث الهاي كوبي
             </button>
             <button 
               onClick={handleExportCsv}
