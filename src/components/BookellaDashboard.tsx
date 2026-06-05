@@ -91,7 +91,7 @@ const normalizeTypeValue = (value?: string): "أوريجينال" | "هاي كو
     .toLowerCase()
     .replace(/\s+/g, "")
     .replace(/[أإآ]/g, "ا");
-  const originalTokens = ["اوريجينال", "اوريجنال", "original", "orig"];
+  const originalTokens = ["اوريجينال", "اوريجنال", "original", "orig", "اصلي", "اصليه", "أصلي"];
   return originalTokens.some((token) => normalized.includes(token)) ? "أوريجينال" : "هاي كوبي";
 };
 
