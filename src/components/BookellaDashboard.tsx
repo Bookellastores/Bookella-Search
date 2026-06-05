@@ -844,6 +844,7 @@ export default function BookellaDashboard() {
                       ...mergedList[index],
                       ...newBook,
                       id: mergedList[index].id,
+                      libraryName: mergedList[index].libraryName,
                       originalPrice:
                         newBook.originalPrice > 0
                           ? newBook.originalPrice
