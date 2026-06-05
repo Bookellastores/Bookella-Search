@@ -730,7 +730,7 @@ export default function BookellaDashboard() {
 
   const handleBulkSetType = (newType: "هاي كوبي" | "أوريجينال") => {
     if (!window.confirm(`تحويل ${selectedBookIds.size} كتاب إلى ${newType}؟`)) return;
-    setBooks(prev => prev.map(b => selectedBookIds.has(b.id) ? { ...b, libraryName: newType } : b));
+    setBooks(prev => prev.map(b => selectedBookIds.has(b.id) ? { ...b, type: newType } : b));
     showToast(`تم تحديث نوع ${selectedBookIds.size} كتاب إلى ${newType}`, 'success');
   };
 
