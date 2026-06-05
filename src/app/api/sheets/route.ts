@@ -176,7 +176,7 @@ export async function GET(request: Request) {
           id: getVal(0).startsWith("BOO-") ? getVal(0) : `SHEETS-${Date.now()}-${rIdx}`,
           charGroup: getVal(charIdx) || title.charAt(0) || "ا",
           title,
-          type: getVal(typeIdx) || "هاي كوبي",
+          type: getVal(typeIdx) || "",
           author: normalizeAuthorName(getVal(authorIdx, "غير معروف")),
           category: getVal(categoryIdx, "رواية"),
           series: getVal(seriesIdx),
