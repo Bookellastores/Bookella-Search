@@ -40,7 +40,6 @@ export function mergeBookWithMetadata(
   book: InventoryBook,
   meta: EnrichedBookMetadata
 ): InventoryBook {
-  const nextTitle = meta.title?.trim() || book.title;
   const author = meta.author ? normalizeAuthorName(meta.author) : book.author;
   const category = shouldPreferExistingCategory(book.category, meta.category || "")
     ? book.category
@@ -48,8 +47,8 @@ export function mergeBookWithMetadata(
 
   return {
     ...book,
-    charGroup: nextTitle.charAt(0) || book.charGroup,
-    title: nextTitle,
+    charGroup: book.charGroup,
+    title: book.title,
     author:
       author && author !== "غير معروف" && author !== "مؤلف غير معروف" ? author : book.author,
     category,
