@@ -1972,7 +1972,7 @@ export default function BookellaDashboard() {
                     onClick={handleAutoFetch}
                     className="px-4 bg-[#005AC1] hover:bg-[#00479e] text-white text-xs font-bold rounded-lg flex items-center gap-1 transition-all active:scale-95 disabled:opacity-40 whitespace-nowrap"
                   >
-                    {apiLoading ? "جاري الجلب..." : "إكمال تلقائي"}
+                    {apiLoading ? "جاري التحليل..." : "جلب ذكي (AI)"}
                   </button>
                 </div>
                 {(booksApiConfig.hasGemini ||
