@@ -43,6 +43,8 @@ import {
   Table,
   ExternalLink,
   Check,
+  Moon,
+  Sun,
   Library,
   Filter,
   BookCopy,
@@ -70,6 +72,7 @@ interface Book {
   isbn: string;
   libraryName: string;
   lastRefreshedAt?: number;
+  suggestedTitle?: string | null;
 }
 
 type SortKey =
@@ -243,6 +246,9 @@ const INITIAL_BOOKS: Book[] = [
 ];
 
 export default function BookellaDashboard() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const { data: session, status } = useSession();
 
   // Inventory Books state
@@ -1408,7 +1414,20 @@ export default function BookellaDashboard() {
       )}
 
       {/* Hero Header */}
-      <header className="bg-white text-[#001D35] py-8 px-6 sm:px-12 relative overflow-hidden border-b border-[#E1E2EC]">
+      <header className="bg-white dark:bg-[#001D35] text-[#001D35] dark:text-white py-8 px-6 sm:px-12 relative overflow-hidden border-b border-[#E1E2EC] dark:border-slate-800">
+
+          <div className="absolute top-6 left-6 z-10 flex gap-2">
+            {mounted && (
+              <button
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                className="p-2 rounded-full bg-white/80 dark:bg-slate-800/80 backdrop-blur border border-slate-200 dark:border-slate-700 shadow-sm text-slate-700 dark:text-slate-300 hover:scale-105 transition-all"
+                title="تغيير المظهر"
+              >
+                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              </button>
+            )}
+          </div>
+
         <div className="absolute inset-0 bg-left-bottom bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-blue-500/5 via-transparent to-transparent pointer-events-none" />
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
           <div>
@@ -1535,6 +1554,37 @@ export default function BookellaDashboard() {
               <Check className="w-3.5 h-3.5" />
               تحديث المحدد ({selectedBookIds.size})
             </button>
+
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={selectedBookIds.size === 0}
+              className="px-3 py-2 bg-rose-50 hover:bg-rose-100/80 text-rose-900 border border-rose-200 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
+              title="حذف الكتب المحددة"
+            >
+              حذف المحدد
+            </button>
+            <div className="flex gap-1 border-r border-slate-300 pr-2 mr-2">
+              <button
+                type="button"
+                onClick={() => handleBulkSetType("أوريجينال")}
+                disabled={selectedBookIds.size === 0}
+                className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100/80 text-emerald-900 border border-emerald-200 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
+                title="جعل المحدد أوريجينال"
+              >
+                أوريجينال
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBulkSetType("هاي كوبي")}
+                disabled={selectedBookIds.size === 0}
+                className="px-3 py-2 bg-sky-50 hover:bg-sky-100/80 text-sky-900 border border-sky-200 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
+                title="جعل المحدد هاي كوبي"
+              >
+                هاي كوبي
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={handleRefreshAllBooks}
@@ -1591,7 +1641,7 @@ export default function BookellaDashboard() {
           <div className="bg-[#D3E4FF] p-5 rounded-2xl border border-[#E1E2EC] flex items-center gap-4">
             <div className="p-3 bg-white/50 text-[#001D35] rounded-xl"><BookMarked className="w-6 h-6" /></div>
             <div>
-              <p className="text-[#001D35] text-xs font-bold opacity-80">العناوين المقيدة</p>
+              <p className="text-[#001D35] text-xs font-bold opacity-80">العناوين المقيدة (عدد الكتب المختلفة)</p>
               <h3 className="text-2xl font-black text-[#001D35] mt-1">{inventoryStats.total}</h3>
               <p className="text-[10px] text-[#005AC1] font-bold mt-1">
                 أوريجينال {inventoryStats.original} · هاي كوبي {inventoryStats.highCopy}
@@ -1603,7 +1653,7 @@ export default function BookellaDashboard() {
             <div>
               <p className="text-[#1A1C1E] text-xs font-bold opacity-80">إجمالي النسخ (مجموع الكميات)</p>
               <h3 className="text-2xl font-black text-[#1A1C1E] mt-1">{books.reduce((acc, b) => acc + (b.quantity || 5), 0)}</h3>
-              <p className="text-[10px] text-stone-500 mt-0.5">{inventoryStats.total} عنوان · ليس عدد العناوين</p>
+              <p className="text-[10px] text-stone-500 mt-0.5">{inventoryStats.total} عنوان مختلف</p>
             </div>
           </div>
           <div className="bg-[#D3E4FF] p-5 rounded-2xl border border-[#E1E2EC] flex items-center gap-4">
@@ -1824,14 +1874,14 @@ export default function BookellaDashboard() {
                     </th>
                     <th className="py-4 px-4">Book ID</th>
                     <th className="py-4 px-6">الغلاف</th>
-                    <th className="py-4 px-6">اسم الكتاب</th>
+                    <th className="py-4 px-6 cursor-pointer hover:text-[#005AC1]" onClick={() => setSortBy("title")}>اسم الكتاب ⇕</th>
                     <th className="py-4 px-6">النوع</th>
-                    <th className="py-4 px-6">الكاتب</th>
+                    <th className="py-4 px-6 cursor-pointer hover:text-[#005AC1]" onClick={() => setSortBy("author")}>الكاتب ⇕</th>
                     <th className="py-4 px-6">التصنيف الرئيسي</th>
                     <th className="py-4 px-6 text-center">عدد الصفحات</th>
                     <th className="py-4 px-6">ISBN</th>
-                    <th className="py-4 px-6 text-center">سعر الشراء</th>
-                    <th className="py-4 px-6 text-center">سعر البيع</th>
+                    <th className="py-4 px-6 text-center cursor-pointer hover:text-[#005AC1]" onClick={() => setSortBy("priceAsc")}>سعر الشراء ⇕</th>
+                    <th className="py-4 px-6 text-center cursor-pointer hover:text-[#005AC1]" onClick={() => setSortBy("priceDesc")}>سعر البيع ⇕</th>
                     <th className="py-4 px-6 text-center">خيارات</th>
                   </tr>
                 </thead>
@@ -1857,7 +1907,42 @@ export default function BookellaDashboard() {
                           )}
                         </div>
                       </td>
-                      <td className="py-4 px-6 font-semibold group-hover:text-[#005AC1] transition-colors">{b.title}</td>
+                      <td className="py-4 px-6 font-semibold group-hover:text-[#005AC1] transition-colors">
+  {b.title}
+  {b.suggestedTitle && (
+    <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-lg shadow-sm text-xs text-yellow-800">
+      <div className="font-bold mb-1">اقتراح تصحيح الاسم:</div>
+      <div className="flex items-center gap-2">
+        <span className="flex-1 font-mono">{b.suggestedTitle}</span>
+        <button
+          onClick={() => {
+            const next = [...books];
+            const idx = next.findIndex(bk => bk.id === b.id);
+            if(idx > -1) {
+              next[idx] = { ...next[idx], title: b.suggestedTitle!, suggestedTitle: null };
+              setBooks(next);
+              persistBooks(next, true);
+              showToast("تم تطبيق التصحيح بنجاح", "success");
+            }
+          }}
+          className="px-2 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 font-bold"
+        >موافق</button>
+        <button
+          onClick={() => {
+            const next = [...books];
+            const idx = next.findIndex(bk => bk.id === b.id);
+            if(idx > -1) {
+              next[idx] = { ...next[idx], suggestedTitle: null };
+              setBooks(next);
+              persistBooks(next, true);
+            }
+          }}
+          className="px-2 py-1 bg-stone-200 text-stone-700 rounded hover:bg-stone-300 font-bold"
+        >رفض</button>
+      </div>
+    </div>
+  )}
+</td>
                       <td className="py-4 px-6">
                         <span
                           className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
@@ -2145,10 +2230,9 @@ export default function BookellaDashboard() {
                     type="number"
                     min="0"
                     step="1"
-                    value={purchasePrice}
+                    value={purchasePrice} placeholder="سعر الشراء (تكلفتك)" title="سعر الشراء"
                     onChange={(e) => setPurchasePrice(e.target.value)}
                     aria-label="سعر الشراء من المكتبة"
-                    placeholder="40"
                     className="w-full px-3 py-2 border border-amber-200 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-amber-500 bg-white"
                   />
                 </div>
@@ -2162,10 +2246,9 @@ export default function BookellaDashboard() {
                     type="number"
                     min="0"
                     step="1"
-                    value={salePrice}
+                    value={salePrice} placeholder="سعر البيع للعميل" title="سعر البيع"
                     onChange={(e) => setSalePrice(e.target.value)}
                     aria-label="سعر البيع للعميل"
-                    placeholder="55"
                     className="w-full px-3 py-2 border border-[#D6E3FF] rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-[#005AC1] bg-white"
                   />
                 </div>

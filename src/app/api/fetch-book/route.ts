@@ -22,6 +22,7 @@ function pickRicher(
     coverImage: server.coverImage || client.coverImage,
     publisher: server.publisher || client.publisher,
     language: server.language || client.language,
+    suggestedTitle: server.suggestedTitle || client.suggestedTitle || null,
     arabicSummary:
       server.arabicSummary.length > client.arabicSummary.length
         ? server.arabicSummary

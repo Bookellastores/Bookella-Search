@@ -35,14 +35,19 @@ ${JSON.stringify(compactSources, null, 0)}
 البيانات الحالية المقترحة:
 ${JSON.stringify(base, null, 0)}
 
-المطلوب: استخرج أدق معلومات للكتاب المطلوب فقط. إن وُجدت نسخة عربية للعنوان ففضّلها.
-اكتب ملخصاً عربياً جذاباً من 2-3 جمل (لا تنسخ وصفاً إنجليزياً حرفياً).
+المطلوب:
+1. استخرج أدق معلومات للكتاب المطلوب فقط.
+2. **ممنوع منعاً باتاً** تغيير اسم الكتاب الأصلي المكتوب في حقل title. أعده كما هو بالضبط.
+3. إذا وجدت أن هناك خطأ إملائي واضح في اسم الكتاب (title)، قم بوضعه في حقل "suggestedTitle" كاسم مقترح للتصحيح، وإلا اجعله null.
+4. يجب أن يكون التصنيف (category) باللغة العربية فقط (مثل: رواية، تاريخ، تطوير الذات).
+5. اكتب ملخصاً عربياً جذاباً من 2-3 جمل (لا تنسخ وصفاً إنجليزياً حرفياً).
 
 أعد JSON فقط بهذا الشكل:
 {
-  "title": "string",
+  "title": "string (نفس الاسم الأصلي دون تغيير)",
+  "suggestedTitle": "string or null",
   "author": "string",
-  "category": "string",
+  "category": "string (باللغة العربية فقط)",
   "pageCount": number,
   "isbn": "string or null",
   "coverImage": "string or null",
@@ -65,7 +70,8 @@ ${JSON.stringify(base, null, 0)}
     };
 
     return {
-      title: parsed.title || base.title,
+      title: base.title, // دائماً نأخذ الاسم الأساسي لمنع تغييره
+      suggestedTitle: parsed.suggestedTitle || null,
       author: parsed.author || base.author,
       category: parsed.category || base.category,
       pageCount: parsed.pageCount && parsed.pageCount > 0 ? parsed.pageCount : base.pageCount,

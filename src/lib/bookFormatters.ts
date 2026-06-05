@@ -26,10 +26,15 @@ const CATEGORY_AR_MAP: Record<string, string> = {
 };
 
 export function normalizeAuthorName(author: string): string {
-  const trimmed = (author || "").trim();
+  let trimmed = (author || "").trim();
   if (!trimmed) return "غير معروف";
-  if (!trimmed.includes(",")) return trimmed;
+  
+  // Handle Arabic and English commas
+  if (!trimmed.includes(",") && !trimmed.includes("،")) return trimmed;
 
+  // Replace Arabic comma with English comma for splitting
+  trimmed = trimmed.replace(/،/g, ",");
+  
   const parts = trimmed.split(",").map((p) => p.trim()).filter(Boolean);
   if (parts.length === 2) {
     return `${parts[1]} ${parts[0]}`.replace(/\s+/g, " ").trim();

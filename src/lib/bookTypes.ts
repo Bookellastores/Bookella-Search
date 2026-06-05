@@ -17,6 +17,7 @@ export interface UnifiedBook {
 
 export interface EnrichedBookMetadata {
   title: string;
+  suggestedTitle: string | null;
   author: string;
   category: string;
   pageCount: number;

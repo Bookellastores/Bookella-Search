@@ -70,6 +70,7 @@ export function mergeToEnrichedMetadata(
     coverImage,
     publisher: firstNonEmpty(...pool.map((b) => b.publisher), best.publisher),
     language: firstNonEmpty(...pool.map((b) => b.language), best.language) || "عربي",
+    suggestedTitle: null,
     arabicSummary,
     sourcesUsed,
   };
