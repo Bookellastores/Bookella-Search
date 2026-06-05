@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
+import { useTheme } from "next-themes";
 import Link from "next/link";
 import { mergeToEnrichedMetadata } from "@/lib/bookMetadataMerge";
 import {
@@ -443,6 +444,30 @@ export default function BookellaDashboard() {
     return books.some(b => b.title.trim().toLowerCase() === title.trim().toLowerCase());
   }, [title, books]);
 
+  const [isUploading, setIsUploading] = useState(false);
+  const handleUploadCoverToS3 = async () => {
+    if (!coverUrl) return;
+    setIsUploading(true);
+    try {
+      const res = await fetch('/api/upload-s3', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: coverUrl, title, isbn })
+      });
+      const data = await res.json();
+      if (data.url) {
+        setCoverUrl(data.url);
+        showToast('تم رفع الصورة بنجاح إلى السحابة!', 'success');
+      } else {
+        showToast(data.error || 'فشل رفع الصورة', 'error');
+      }
+    } catch (e: any) {
+      showToast('حدث خطأ أثناء الرفع', 'error');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const resetAddBookForm = () => {
     setBookType("هاي كوبي");
     setTitle("");
@@ -698,6 +723,19 @@ export default function BookellaDashboard() {
   const handleSmartBatch200 = () => runBatchRefresh("all", 200);
   const handleRefreshOriginalBooks = () => runBatchRefresh("original", "all");
   const handleRefreshHighCopyBooks = () => runBatchRefresh("highcopy", "all");
+  const handleBulkDelete = () => {
+    if (!window.confirm(`هل أنت متأكد من حذف ${selectedBookIds.size} كتاب؟`)) return;
+    setBooks(prev => prev.filter(b => !selectedBookIds.has(b.id)));
+    setSelectedBookIds(new Set());
+    showToast(`تم حذف ${selectedBookIds.size} كتاب بنجاح`, 'success');
+  };
+
+  const handleBulkSetType = (newType: "هاي كوبي" | "أوريجينال") => {
+    if (!window.confirm(`تحويل ${selectedBookIds.size} كتاب إلى ${newType}؟`)) return;
+    setBooks(prev => prev.map(b => selectedBookIds.has(b.id) ? { ...b, libraryName: newType } : b));
+    showToast(`تم تحديث نوع ${selectedBookIds.size} كتاب إلى ${newType}`, 'success');
+  };
+
   const handleRefreshSelected = () => runBatchRefresh("all", "all");
 
   const handleRefreshSingleBook = async (book: Book) => {
@@ -2271,6 +2309,16 @@ export default function BookellaDashboard() {
                   placeholder="https://..."
                   className="w-full px-3 py-2 border border-[#E1E2EC] rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-[#005AC1] ltr text-left"
                 />
+                <div className="mt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleUploadCoverToS3}
+                    disabled={isUploading || !coverUrl || coverUrl.includes('amazonaws.com')}
+                    className="px-3 py-1.5 text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50"
+                  >
+                    {isUploading ? 'جاري الرفع...' : 'رفع الصورة للسحابة ☁️'}
+                  </button>
+                </div>
               </div>
 
               <div className="flex gap-2.5 pt-4">
