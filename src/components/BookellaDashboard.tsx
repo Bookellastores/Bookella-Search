@@ -469,7 +469,6 @@ export default function BookellaDashboard() {
   };
 
   const resetAddBookForm = () => {
-    setBookType("هاي كوبي");
     setTitle("");
     setAuthor("");
     setCategory("رواية");
@@ -479,7 +478,6 @@ export default function BookellaDashboard() {
     setLanguage("عربي");
     setPageCount("250");
     setCoverUrl("");
-    setPublisher("");
     setNotes("");
     setIsbn("");
   };
@@ -845,6 +843,7 @@ export default function BookellaDashboard() {
                       ...newBook,
                       id: mergedList[index].id,
                       libraryName: mergedList[index].libraryName,
+                      type: mergedList[index].type,
                       originalPrice:
                         newBook.originalPrice > 0
                           ? newBook.originalPrice
