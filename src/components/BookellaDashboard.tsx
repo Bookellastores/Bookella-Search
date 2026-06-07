@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import { useTheme } from "next-themes";
+import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { mergeToEnrichedMetadata } from "@/lib/bookMetadataMerge";
 import {
@@ -1533,6 +1534,63 @@ export default function BookellaDashboard() {
               ربط Google Sheets
             </button>
 
+            {/* Floating Bulk Actions Bar */}
+            <AnimatePresence>
+              {selectedBookIds.size > 0 && (
+                <motion.div
+                  initial={{ y: 100, opacity: 0, x: "-50%" }}
+                  animate={{ y: 0, opacity: 1, x: "-50%" }}
+                  exit={{ y: 100, opacity: 0, x: "-50%" }}
+                  className="fixed bottom-8 left-1/2 z-50 bg-white/80 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.1)] border border-stone-200/50 rounded-2xl p-2.5 flex items-center gap-2"
+                >
+                  <span className="text-sm font-bold text-stone-600 px-3 border-l border-stone-300">
+                    تم تحديد {selectedBookIds.size}
+                  </span>
+                  
+                  <button
+                    type="button"
+                    onClick={handleRefreshSelected}
+                    disabled={refreshAllLoading}
+                    className="px-4 py-2 bg-[#005AC1] hover:bg-[#004A9F] text-white rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
+                    title="تحديث الكتب المحددة فقط"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    تحديث
+                  </button>
+
+                  <div className="w-px h-6 bg-stone-300 mx-1"></div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleBulkSetType("أوريجينال")}
+                    className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/50 rounded-xl text-xs font-bold transition-all shadow-sm"
+                    title="جعل المحدد أوريجينال"
+                  >
+                    أوريجينال
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBulkSetType("هاي كوبي")}
+                    className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200/50 rounded-xl text-xs font-bold transition-all shadow-sm"
+                    title="جعل المحدد هاي كوبي"
+                  >
+                    هاي كوبي
+                  </button>
+
+                  <div className="w-px h-6 bg-stone-300 mx-1"></div>
+
+                  <button
+                    type="button"
+                    onClick={handleBulkDelete}
+                    className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/50 rounded-xl text-xs font-bold transition-all shadow-sm"
+                    title="حذف الكتب المحددة"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <button 
               onClick={() => setIsExplorerOpen(true)}
               className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100/80 text-indigo-850 border border-indigo-200 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all active:scale-95"
@@ -1583,46 +1641,7 @@ export default function BookellaDashboard() {
             >
               200
             </button>
-            <button
-              type="button"
-              onClick={handleRefreshSelected}
-              disabled={refreshAllLoading || selectedBookIds.size === 0}
-              className="px-4 py-2 bg-orange-50 hover:bg-orange-100/80 text-orange-900 border border-orange-200 rounded-xl flex items-center gap-1.5 text-xs font-bold transition-all disabled:opacity-40"
-              title="تحديث الكتب المحددة فقط"
-            >
-              <Check className="w-3.5 h-3.5" />
-              تحديث المحدد ({selectedBookIds.size})
-            </button>
 
-            <button
-              type="button"
-              onClick={handleBulkDelete}
-              disabled={selectedBookIds.size === 0}
-              className="px-3 py-2 bg-rose-50 hover:bg-rose-100/80 text-rose-900 border border-rose-200 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
-              title="حذف الكتب المحددة"
-            >
-              حذف المحدد
-            </button>
-            <div className="flex gap-1 border-r border-slate-300 pr-2 mr-2">
-              <button
-                type="button"
-                onClick={() => handleBulkSetType("أوريجينال")}
-                disabled={selectedBookIds.size === 0}
-                className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100/80 text-emerald-900 border border-emerald-200 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
-                title="جعل المحدد أوريجينال"
-              >
-                أوريجينال
-              </button>
-              <button
-                type="button"
-                onClick={() => handleBulkSetType("هاي كوبي")}
-                disabled={selectedBookIds.size === 0}
-                className="px-3 py-2 bg-sky-50 hover:bg-sky-100/80 text-sky-900 border border-sky-200 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
-                title="جعل المحدد هاي كوبي"
-              >
-                هاي كوبي
-              </button>
-            </div>
 
             <button
               type="button"
@@ -1889,16 +1908,27 @@ export default function BookellaDashboard() {
 
           {/* Data Grid table */}
           {filteredBooks.length === 0 ? (
-            <div className="p-20 text-center text-stone-400 flex flex-col items-center justify-center gap-3 bg-stone-50/50">
-              <BookOpen className="w-12 h-12 text-stone-300 animate-pulse" />
-              <p className="font-bold text-stone-600">لا توجد كتب مطابقة لخيارات الفلترة المطروحة</p>
-              <p className="text-xs text-stone-400">حاول إعادة تصفير حقول البحث والفرز</p>
-            </div>
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="p-20 text-center text-[#001D35] flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-[#F8F9FF] to-white rounded-2xl border border-[#E1E2EC]/50 m-4 shadow-sm"
+            >
+              <motion.div
+                animate={{ y: [0, -10, 0] }}
+                transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
+              >
+                <BookOpen className="w-16 h-16 text-[#005AC1]/50" />
+              </motion.div>
+              <div className="space-y-1">
+                <p className="font-bold text-lg text-[#001D35]">لا توجد كتب مطابقة لخيارات الفلترة المطروحة</p>
+                <p className="text-sm text-[#44474E]">حاول إعادة تصفير حقول البحث والفرز</p>
+              </div>
+            </motion.div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-right text-sm">
-                <thead>
-                  <tr className="bg-[#F8F9FF] border-b border-[#E1E2EC] text-stone-500 font-bold">
+                <thead className="sticky top-0 z-20 shadow-sm">
+                  <tr className="bg-[#F8F9FF] border-b border-[#E1E2EC] text-stone-500 font-bold backdrop-blur-md bg-opacity-95">
                     <th className="py-4 px-3 w-10">
                       <input
                         type="checkbox"
