@@ -1205,9 +1205,33 @@ export default function BookellaDashboard() {
 
   // CSV Export action
   const handleExportCsv = () => {
-    let header = "Book ID,الحرف,اسم الكتاب,نوع الكتاب,اسم الكاتب,التصنيف الرئيسي,اسم السلسلة,تصنيفات فرعية,سعر الشراء,سعر البيع,الكمية المتاحة,لغة الكتاب,دار النشر,عدد الصفحات,ISBN,رابط صورة الغلاف,ملاحظات,اسم المكتبة\n";
+    // Add BOM for Excel Arabic support
+    let header = "\ufeffBook ID,الحرف,اسم الكتاب,نوع الكتاب,اسم الكاتب,التصنيف الرئيسي,اسم السلسلة,تصنيفات فرعية,سعر الشراء,سعر البيع,الكمية المتاحة,لغة الكتاب,دار النشر,عدد الصفحات,ISBN,رابط صورة الغلاف,ملاحظات,اسم المكتبة\n";
+    
+    const escapeCsv = (str: string) => {
+      if (!str) return '""';
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
     const body = books.map(b => [
-      b.id, b.charGroup, `"${b.title}"`, `"${b.type}"`, `"${b.author}"`, `"${b.category}"`, `"${b.series}"`, `"${b.subCategories}"`, b.originalPrice, b.price, b.quantity, `"${b.language}"`, `"${b.publisher}"`, b.pageCount, `"${b.isbn || ""}"`, `"${b.coverUrl}"`, `"${b.notes}"`, `"${b.libraryName}"`
+      b.id,
+      b.charGroup,
+      escapeCsv(b.title),
+      escapeCsv(b.type),
+      escapeCsv(b.author),
+      escapeCsv(b.category),
+      escapeCsv(b.series),
+      escapeCsv(b.subCategories),
+      b.originalPrice || 0,
+      b.price || 0,
+      b.quantity || 0,
+      escapeCsv(b.language),
+      escapeCsv(b.publisher),
+      b.pageCount || 0,
+      escapeCsv(b.isbn),
+      escapeCsv(b.coverUrl),
+      escapeCsv(b.notes),
+      escapeCsv(b.libraryName)
     ].join(",")).join("\n");
     
     const blob = new Blob([header + body], { type: "text/csv;charset=utf-8;" });
