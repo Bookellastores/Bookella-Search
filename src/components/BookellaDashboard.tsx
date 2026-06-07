@@ -50,7 +50,8 @@ import {
   Library,
   Filter,
   BookCopy,
-  Pencil
+  Pencil,
+  ChevronDown
 } from "lucide-react";
 
 interface Book {
@@ -250,7 +251,16 @@ const INITIAL_BOOKS: Book[] = [
 export default function BookellaDashboard() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 300);
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
   const { data: session, status } = useSession();
 
   // Inventory Books state
@@ -2000,7 +2010,7 @@ export default function BookellaDashboard() {
                       <td className="py-4 px-6">
                         <div className="w-10 h-14 rounded-md border border-[#E1E2EC] overflow-hidden bg-[#F1F4F9] flex items-center justify-center text-[10px] font-bold text-[#005AC1] text-center shadow-inner">
                           {b.coverUrl ? (
-                            <img src={b.coverUrl} alt={b.title} className="w-full h-full object-cover" />
+                            <img src={b.coverUrl || "https://placehold.co/100x150/F8F9FF/9ca3af?text=No+Cover"} alt={b.title} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.src = "https://placehold.co/100x150/F8F9FF/9ca3af?text=No+Cover"; }} loading="lazy" />
                           ) : (
                             b.title.slice(0, 2)
                           )}
@@ -2917,7 +2927,7 @@ export default function BookellaDashboard() {
                         {/* Book image thumb */}
                         <div className="w-16 h-24 bg-[#F1F4F9] rounded-xl overflow-hidden shadow-inner flex items-center justify-center shrink-0 border border-[#E1E2EC]">
                           {thumb ? (
-                            <img src={thumb} alt={titleStr} className="w-full h-full object-cover transition-transform group-hover:scale-110 duration-200" />
+                            <img src={thumb || "https://placehold.co/100x150/F8F9FF/9ca3af?text=No+Cover"} alt={titleStr} className="w-full h-full object-cover transition-transform group-hover:scale-110 duration-200" onError={(e) => { e.currentTarget.src = "https://placehold.co/100x150/F8F9FF/9ca3af?text=No+Cover"; }} loading="lazy" />
                           ) : (
                             <span className="text-xs font-bold text-stone-400">لا غلاف</span>
                           )}
@@ -3152,7 +3162,7 @@ export default function BookellaDashboard() {
                         {/* Cover */}
                         <div className="w-16 h-24 bg-[#F1F4F9] rounded-xl overflow-hidden shadow-inner flex items-center justify-center shrink-0 border border-[#E1E2EC]">
                           {libBook.coverUrl ? (
-                            <img src={libBook.coverUrl} alt={libBook.title} className="w-full h-full object-cover transition-transform group-hover:scale-110 duration-200" />
+                            <img src={libBook.coverUrl || "https://placehold.co/100x150/F8F9FF/9ca3af?text=No+Cover"} alt={libBook.title} className="w-full h-full object-cover transition-transform group-hover:scale-110 duration-200" onError={(e) => { e.currentTarget.src = "https://placehold.co/100x150/F8F9FF/9ca3af?text=No+Cover"; }} loading="lazy" />
                           ) : (
                             <BookCopy className="w-6 h-6 text-stone-300" />
                           )}
@@ -3254,6 +3264,21 @@ export default function BookellaDashboard() {
           </div>
         </div>
       )}
+      {/* Scroll to Top */}
+      <AnimatePresence>
+        {showScrollTop && (
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            className="fixed bottom-6 right-6 p-3 bg-[#005AC1] hover:bg-[#004799] text-white rounded-full shadow-lg shadow-[#005AC1]/30 z-50 flex items-center justify-center transition-colors"
+            title="الصعود لأعلى"
+          >
+            <ChevronDown className="w-6 h-6 rotate-180" />
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
