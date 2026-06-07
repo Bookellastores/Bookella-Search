@@ -253,12 +253,12 @@ function parseCSV(text: string): string[][] {
 }
 
 function findHeaderIndex(headers: string[], synonyms: string[]): number {
-  return headers.findIndex((header) =>
-    synonyms.some(
+  return headers.findIndex((header) => {
+    if (!header || header.trim() === "") return false;
+    return synonyms.some(
       (syn) =>
         header === syn.toLowerCase() ||
-        header.includes(syn.toLowerCase()) ||
-        syn.toLowerCase().includes(header)
-    )
-  );
+        header.includes(syn.toLowerCase())
+    );
+  });
 }

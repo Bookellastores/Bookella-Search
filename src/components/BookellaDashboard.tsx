@@ -844,6 +844,12 @@ export default function BookellaDashboard() {
                       ...newBook,
                       id: mergedList[index].id,
                       title: mergedList[index].title,
+                      coverUrl: newBook.coverUrl || mergedList[index].coverUrl,
+                      isbn: newBook.isbn || mergedList[index].isbn,
+                      author: newBook.author && newBook.author !== "غير معروف" ? newBook.author : mergedList[index].author,
+                      publisher: newBook.publisher || mergedList[index].publisher,
+                      pageCount: newBook.pageCount > 0 ? newBook.pageCount : mergedList[index].pageCount,
+                      language: newBook.language || mergedList[index].language,
                       libraryName: mergedList[index].libraryName,
                       type: mergedList[index].type,
                       originalPrice:

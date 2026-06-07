@@ -50,14 +50,18 @@ export function mergeBookWithMetadata(
     charGroup: book.charGroup,
     title: book.title,
     author:
-      author && author !== "غير معروف" && author !== "مؤلف غير معروف" ? author : book.author,
+      book.author && book.author !== "غير معروف" && book.author !== "مؤلف غير معروف"
+        ? book.author
+        : author && author !== "غير معروف" && author !== "مؤلف غير معروف"
+        ? author
+        : "غير معروف",
     category,
-    pageCount: meta.pageCount > 0 ? meta.pageCount : book.pageCount,
-    coverUrl: meta.coverImage || book.coverUrl || fallbackCoverFromIsbn(meta.isbn || book.isbn),
-    publisher: meta.publisher || book.publisher,
-    language: meta.language || book.language,
-    notes: meta.arabicSummary || book.notes,
-    isbn: meta.isbn || book.isbn,
+    pageCount: book.pageCount > 0 ? book.pageCount : meta.pageCount > 0 ? meta.pageCount : 0,
+    coverUrl: book.coverUrl || meta.coverImage || fallbackCoverFromIsbn(book.isbn || meta.isbn),
+    publisher: book.publisher || meta.publisher,
+    language: book.language || meta.language,
+    notes: book.notes || meta.arabicSummary,
+    isbn: book.isbn || meta.isbn,
     originalPrice: book.originalPrice,
     price: book.price,
     discountedPrice: book.discountedPrice,
